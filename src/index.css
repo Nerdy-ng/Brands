@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    @apply h-full;
+  }
+
+  body {
+    @apply bg-gray-950 text-gray-100 antialiased;
+  }
+
+  * {
+    @apply box-border;
+  }
+
+  input, textarea, select {
+    @apply bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-700 rounded-xl px-4 py-3 w-full focus:outline-none focus:border-purple-600 transition-colors;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-xl px-5 py-3 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply bg-gray-800 hover:bg-gray-700 text-gray-100 font-semibold rounded-xl px-5 py-3 transition-colors border border-gray-700;
+  }
+  .card {
+    @apply bg-gray-900 rounded-2xl border border-gray-800 p-5;
+  }
+  .sidebar-link {
+    @apply flex items-center gap-3 px-4 py-2.5 rounded-xl text-gray-400 hover:text-white hover:bg-gray-800 transition-colors text-sm font-medium cursor-pointer;
+  }
+  .sidebar-link.active {
+    @apply text-white bg-purple-600/20 text-purple-400;
+  }
+  .stat-card {
+    @apply card flex flex-col gap-1;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { @apply bg-gray-700 rounded-full; }
+::-webkit-scrollbar-thumb:hover { @apply bg-gray-600; }
