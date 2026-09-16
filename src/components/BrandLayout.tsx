@@ -12,7 +12,7 @@ const NAV = [
   { icon: Search,          label: 'Discover',   href: '/brand/discover' },
   { icon: Megaphone,       label: 'Campaigns',  href: '/brand/campaigns' },
   { icon: Handshake,       label: 'Collabs',    href: '/brand/collabs' },
-  { icon: CreditCard,      label: 'Payments',   href: '/brand/payments' },
+  { icon: CreditCard,      label: 'Transactions', href: '/brand/payments' },
   { icon: User,            label: 'Profile',    href: '/brand/profile' },
 ]
 
