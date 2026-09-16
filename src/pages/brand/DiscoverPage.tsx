@@ -24,9 +24,9 @@ export default function DiscoverPage() {
       setLoading(true)
       let q = supabase.from('profiles')
         .select('id, full_name, username, avatar_url, niche, tier, bio, rate_from, wallet_balance')
-        .eq('role', 'creator')
+        .in('role', ['Talent', 'talent', 'creator', 'Creator'])
         .order('created_at', { ascending: false })
-        .limit(50)
+        .limit(200)
       if (niche !== 'All') q = q.ilike('niche', `%${niche}%`)
       if (query) q = q.or(`full_name.ilike.%${query}%,username.ilike.%${query}%,bio.ilike.%${query}%`)
       const { data } = await q
