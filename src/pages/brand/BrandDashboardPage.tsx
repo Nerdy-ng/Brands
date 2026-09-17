@@ -28,7 +28,7 @@ export default function BrandDashboardPage() {
         supabase.from('collabs').select('id').eq('brand_id', user.id).eq('status', 'pending'),
         supabase.from('collabs').select('id').eq('brand_id', user.id).eq('status', 'completed'),
         supabase.from('jobs').select('id').eq('brand_id', user.id),
-        supabase.from('profiles').select('id, full_name, username, avatar_url, niche, tier').eq('role', 'creator').limit(6),
+        supabase.from('profiles').select('id, full_name, username, avatar_url, niche, tier').in('role', ['Talent', 'talent', 'creator', 'Creator']).limit(6),
       ])
       setProfile(profileRes.data)
       setActiveCollabs(collabsRes.data || [])
