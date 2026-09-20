@@ -13,7 +13,8 @@ import DiscoverPage        from './pages/brand/DiscoverPage'
 import CampaignsPage       from './pages/brand/CampaignsPage'
 import CollabsPage         from './pages/brand/CollabsPage'
 import PaymentsPage        from './pages/brand/PaymentsPage'
-import BrandProfilePage    from './pages/brand/BrandProfilePage'
+import BrandProfilePage          from './pages/brand/BrandProfilePage'
+import BrandCreatorProfilePage   from './pages/brand/BrandCreatorProfilePage'
 
 // Creator
 import CreatorDashboardPage from './pages/creator/CreatorDashboardPage'
@@ -67,7 +68,8 @@ function AppRoutes() {
       <Route path="/brand/campaigns" element={<ProtectedBrand><CampaignsPage /></ProtectedBrand>} />
       <Route path="/brand/collabs"   element={<ProtectedBrand><CollabsPage /></ProtectedBrand>} />
       <Route path="/brand/payments"  element={<ProtectedBrand><PaymentsPage /></ProtectedBrand>} />
-      <Route path="/brand/profile"   element={<ProtectedBrand><BrandProfilePage /></ProtectedBrand>} />
+      <Route path="/brand/profile"         element={<ProtectedBrand><BrandProfilePage /></ProtectedBrand>} />
+      <Route path="/brand/creator/:id"     element={<ProtectedBrand><BrandCreatorProfilePage /></ProtectedBrand>} />
       <Route path="/brand/messages"      element={<ProtectedBrand><MessagesPage /></ProtectedBrand>} />
       <Route path="/brand/notifications" element={<ProtectedBrand><NotificationsPage /></ProtectedBrand>} />
       <Route path="/brand/settings"      element={<ProtectedBrand><SettingsPage /></ProtectedBrand>} />

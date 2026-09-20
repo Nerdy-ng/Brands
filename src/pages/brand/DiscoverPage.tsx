@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Search, SlidersHorizontal, Star } from 'lucide-react'
 import BrandLayout from '../../components/BrandLayout'
 import Avatar from '../../components/Avatar'
@@ -14,6 +15,7 @@ const TIER_STYLES: Record<string, { label: string; class: string }> = {
 }
 
 export default function DiscoverPage() {
+  const navigate = useNavigate()
   const [creators, setCreators]   = useState<any[]>([])
   const [query,    setQuery]      = useState('')
   const [niche,    setNiche]      = useState('All')
@@ -23,7 +25,7 @@ export default function DiscoverPage() {
     async function load() {
       setLoading(true)
       let q = supabase.from('profiles')
-        .select('id, full_name, username, avatar_url, niche, tier, bio, rate_from, wallet_balance')
+        .select('id, full_name, username, avatar_url, niche, tier, bio, rate_from')
         .in('role', ['Talent', 'talent', 'creator', 'Creator'])
         .order('created_at', { ascending: false })
         .limit(200)
@@ -87,7 +89,11 @@ export default function DiscoverPage() {
           {creators.map(c => {
             const tier = TIER_STYLES[c.tier] || TIER_STYLES['fast-rising']
             return (
-              <div key={c.id} className="card hover:border-gray-700 transition-colors group">
+              <div
+                key={c.id}
+                className="card hover:border-purple-800/60 transition-colors group cursor-pointer"
+                onClick={() => navigate(`/brand/creator/${c.id}`)}
+              >
                 <div className="flex items-start gap-3 mb-3">
                   <Avatar name={c.full_name || 'Creator'} size="lg" avatarUrl={c.avatar_url} />
                   <div className="flex-1 min-w-0">
