@@ -6,28 +6,28 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { formatAmount, timeAgo } from '../../lib/utils'
 
-const CONTENT_TYPES = ['All','Instagram Post','Instagram Reel','TikTok Video','YouTube Video','Twitter/X Thread','Blog Post','Podcast Mention','Product Review']
+const COLLAB_TYPES = ['All', 'UGC', 'Brand Ambassador', 'Voiceover', 'Influencer', 'Product Review']
 
 export default function OpportunitiesPage() {
   const { user } = useAuth()
-  const [jobs,       setJobs]       = useState<any[]>([])
-  const [query,      setQuery]      = useState('')
-  const [type,       setType]       = useState('All')
-  const [loading,    setLoading]    = useState(true)
-  const [applying,   setApplying]   = useState<string | null>(null)
-  const [applied,    setApplied]    = useState<Set<string>>(new Set())
+  const [jobs,     setJobs]    = useState<any[]>([])
+  const [query,    setQuery]   = useState('')
+  const [type,     setType]    = useState('All')
+  const [loading,  setLoading] = useState(true)
+  const [applying, setApplying] = useState<string | null>(null)
+  const [applied,  setApplied] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     async function load() {
       setLoading(true)
-      let q = supabase.from('jobs')
-        .select(`id, title, description, content_type, budget, deadline, requirements, created_at,
-          profiles:brand_id(company_name, avatar_url, industry)`)
+      let q = supabase
+        .from('public_jobs')
+        .select('id, campaign_name, brief, collab_type, budget, timeline, created_at, profiles:brand_id(company_name, avatar_url)')
         .eq('status', 'open')
         .order('created_at', { ascending: false })
         .limit(50)
-      if (type !== 'All') q = q.eq('content_type', type)
-      if (query) q = q.or(`title.ilike.%${query}%,description.ilike.%${query}%`)
+      if (type !== 'All') q = q.eq('collab_type', type)
+      if (query) q = q.or(`campaign_name.ilike.%${query}%,brief.ilike.%${query}%`)
       const { data } = await q
       setJobs(data || [])
       setLoading(false)
@@ -36,11 +36,14 @@ export default function OpportunitiesPage() {
     return () => clearTimeout(t)
   }, [query, type])
 
-  // Load applied jobs
+  // Load already-applied campaigns
   useEffect(() => {
     async function loadApplied() {
       if (!user) return
-      const { data } = await supabase.from('collab_proposals').select('job_id').eq('creator_id', user.id)
+      const { data } = await supabase
+        .from('job_applications')
+        .select('job_id')
+        .eq('creator_id', user.id)
       if (data) setApplied(new Set(data.map((d: any) => d.job_id)))
     }
     loadApplied()
@@ -50,12 +53,18 @@ export default function OpportunitiesPage() {
     if (!user || applied.has(jobId)) return
     setApplying(jobId)
     try {
-      await supabase.from('collab_proposals').insert({
-        job_id: jobId,
+      const { error } = await supabase.from('job_applications').insert({
+        job_id:     jobId,
         creator_id: user.id,
-        status: 'pending',
-        message: 'I am interested in this campaign.',
+        status:     'pending',
       })
+      if (error) {
+        if (error.code === '23505') {
+          setApplied(prev => new Set([...prev, jobId]))
+          return
+        }
+        throw error
+      }
       setApplied(prev => new Set([...prev, jobId]))
     } catch (err: any) {
       alert(err.message)
@@ -79,7 +88,7 @@ export default function OpportunitiesPage() {
             placeholder="Search campaigns…" className="pl-11" />
         </div>
         <select value={type} onChange={e => setType(e.target.value)} className="sm:w-56">
-          {CONTENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          {COLLAB_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
       </div>
 
@@ -105,38 +114,38 @@ export default function OpportunitiesPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <h3 className="font-semibold text-white">{j.title}</h3>
+                        <h3 className="font-semibold text-white">{j.campaign_name}</h3>
                         <p className="text-gray-500 text-sm">{brand?.company_name}</p>
                       </div>
                       <button
                         onClick={() => handleApply(j.id)}
                         disabled={hasApplied || applying === j.id}
                         className={`flex-shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
-                          hasApplied ? 'bg-green-500/20 text-green-400 cursor-default'
+                          hasApplied
+                            ? 'bg-green-500/20 text-green-400 cursor-default'
                             : 'btn-primary text-sm py-2'
                         }`}>
                         {applying === j.id && <Loader2 size={14} className="animate-spin" />}
                         {hasApplied ? '✓ Applied' : 'Apply'}
                       </button>
                     </div>
-                    <p className="text-gray-400 text-sm mt-2 line-clamp-2">{j.description}</p>
+                    <p className="text-gray-400 text-sm mt-2 line-clamp-2">{j.brief}</p>
                     <div className="flex flex-wrap items-center gap-3 mt-3 text-xs text-gray-500">
-                      <span className="bg-gray-800 px-2.5 py-1 rounded-full">{j.content_type}</span>
+                      {j.collab_type && (
+                        <span className="bg-gray-800 px-2.5 py-1 rounded-full">{j.collab_type}</span>
+                      )}
                       {j.budget > 0 && (
                         <span className="flex items-center gap-1 text-green-400 font-semibold">
                           <DollarSign size={12} /> {formatAmount(j.budget)}
                         </span>
                       )}
-                      {j.deadline && (
+                      {j.timeline && (
                         <span className="flex items-center gap-1">
-                          <Clock size={12} /> Due {new Date(j.deadline).toLocaleDateString()}
+                          <Clock size={12} /> {j.timeline}
                         </span>
                       )}
                       <span>{timeAgo(j.created_at)}</span>
                     </div>
-                    {j.requirements && (
-                      <p className="text-xs text-gray-600 mt-2 line-clamp-1">Requirements: {j.requirements}</p>
-                    )}
                   </div>
                 </div>
               </div>

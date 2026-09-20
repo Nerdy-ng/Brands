@@ -33,7 +33,7 @@ export default function CreatorDashboardPage() {
         supabase.from('collabs').select('id, content_type, total_amount, created_at, status, profiles:brand_id(company_name, avatar_url)').eq('creator_id', user.id).in('status', ['in_progress', 'revision_requested', 'delivered']).order('created_at', { ascending: false }).limit(5),
         supabase.from('collabs').select('id').eq('creator_id', user.id).eq('status', 'completed'),
         supabase.from('collabs').select('id').eq('creator_id', user.id).eq('status', 'pending'),
-        supabase.from('jobs').select('id, title, content_type, budget, deadline, brand_id, profiles:brand_id(company_name, avatar_url)').eq('status', 'open').order('created_at', { ascending: false }).limit(4),
+        supabase.from('public_jobs').select('id, campaign_name, collab_type, budget, timeline, brand_id, profiles:brand_id(company_name, avatar_url)').eq('status', 'open').order('created_at', { ascending: false }).limit(4),
       ])
       setProfile(profileRes.data)
       setActiveCollabs(activeRes.data || [])
@@ -120,7 +120,8 @@ export default function CreatorDashboardPage() {
               {activeCollabs.map(c => {
                 const brand = Array.isArray(c.profiles) ? c.profiles[0] : c.profiles
                 return (
-                  <div key={c.id} className="flex items-center gap-3 p-3 rounded-xl bg-gray-800/50 hover:bg-gray-800 transition-colors">
+                  <Link key={c.id} to={`/creator/collabs?open=${c.id}`}
+                    className="flex items-center gap-3 p-3 rounded-xl bg-gray-800/50 hover:bg-gray-800 transition-colors">
                     <Avatar name={brand?.company_name || 'Brand'} size="sm" avatarUrl={brand?.avatar_url} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-white truncate">{brand?.company_name || 'Brand'}</p>
@@ -132,7 +133,7 @@ export default function CreatorDashboardPage() {
                         {c.status.replace(/_/g, ' ')}
                       </span>
                     </div>
-                  </div>
+                  </Link>
                 )
               })}
             </div>
@@ -158,15 +159,15 @@ export default function CreatorDashboardPage() {
                     <div className="flex items-center gap-2 mb-1">
                       <Avatar name={brand?.company_name || 'Brand'} size="sm" avatarUrl={brand?.avatar_url} />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-white truncate">{j.title}</p>
-                        <p className="text-xs text-gray-500">{brand?.company_name} · {j.content_type}</p>
+                        <p className="text-sm font-medium text-white truncate">{j.campaign_name}</p>
+                        <p className="text-xs text-gray-500">{brand?.company_name} · {j.collab_type}</p>
                       </div>
                       {j.budget > 0 && (
                         <span className="text-sm font-bold text-green-400">{formatAmount(j.budget)}</span>
                       )}
                     </div>
-                    {j.deadline && (
-                      <p className="text-xs text-gray-600 pl-10">Due {new Date(j.deadline).toLocaleDateString()}</p>
+                    {j.timeline && (
+                      <p className="text-xs text-gray-600 pl-10">Timeline: {j.timeline}</p>
                     )}
                   </div>
                 )

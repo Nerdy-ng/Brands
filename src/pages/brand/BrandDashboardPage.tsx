@@ -24,10 +24,10 @@ export default function BrandDashboardPage() {
     try {
       const [profileRes, collabsRes, pendingRes, completedRes, jobsRes, creatorsRes] = await Promise.all([
         supabase.from('profiles').select('company_name, owner_name, wallet_balance, industry').eq('id', user.id).single(),
-        supabase.from('collabs').select('id, content_type, total_amount, creator_id, created_at, status, profiles:creator_id(full_name, avatar_url)').eq('brand_id', user.id).in('status', ['in_progress', 'revision_requested']).order('created_at', { ascending: false }).limit(5),
+        supabase.from('collabs').select('id, content_type, total_amount, creator_id, created_at, status, profiles:creator_id(full_name, avatar_url)').eq('brand_id', user.id).in('status', ['in_progress', 'revision_requested', 'delivered']).order('created_at', { ascending: false }).limit(5),
         supabase.from('collabs').select('id').eq('brand_id', user.id).eq('status', 'pending'),
         supabase.from('collabs').select('id').eq('brand_id', user.id).eq('status', 'completed'),
-        supabase.from('jobs').select('id').eq('brand_id', user.id),
+        supabase.from('public_jobs').select('id').eq('brand_id', user.id),
         supabase.from('profiles').select('id, full_name, username, avatar_url, niche, tier').in('role', ['Talent', 'talent', 'creator', 'Creator']).limit(6),
       ])
       setProfile(profileRes.data)
@@ -120,8 +120,13 @@ export default function BrandDashboardPage() {
                     </div>
                     <div className="text-right">
                       <p className="text-sm font-semibold text-white">{formatAmount(c.total_amount)}</p>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${c.status === 'revision_requested' ? 'text-amber-400 bg-amber-500/10' : 'text-purple-400 bg-purple-500/10'}`}>
-                        {c.status === 'revision_requested' ? 'Revision' : 'In Progress'}
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        c.status === 'revision_requested' ? 'text-amber-400 bg-amber-500/10' :
+                        c.status === 'delivered'          ? 'text-teal-400 bg-teal-500/10'   :
+                                                           'text-purple-400 bg-purple-500/10'
+                      }`}>
+                        {c.status === 'revision_requested' ? 'Revision' :
+                         c.status === 'delivered'          ? 'Delivered' : 'In Progress'}
                       </span>
                     </div>
                   </Link>
