@@ -2,11 +2,7 @@ import React from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 
-// Auth — public auth routes are locked pending launch
-import ComingSoonPage   from './pages/ComingSoonPage'
-import LoginPage       from './pages/auth/LoginPage'
-import BrandSignupPage  from './pages/auth/BrandSignupPage'
-import CreatorSignupPage from './pages/auth/CreatorSignupPage'
+import ComingSoonPage from './pages/ComingSoonPage'
 
 // Brand
 import BrandDashboardPage from './pages/brand/BrandDashboardPage'

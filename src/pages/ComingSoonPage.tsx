@@ -9,8 +9,7 @@ export default function ComingSoonPage() {
         </div>
         <h1 className="text-3xl font-black text-white mb-4">Coming Soon</h1>
         <p className="text-gray-400 text-base leading-relaxed">
-          We're putting the finishing touches on something great.
-          Sign-up and login will be available at launch.
+          We're putting the finishing touches on something great. Check back soon.
         </p>
       </div>
     </div>
