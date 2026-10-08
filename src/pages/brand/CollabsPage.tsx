@@ -8,7 +8,7 @@ import Avatar from '../../components/Avatar'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { formatAmount, timeAgo } from '../../lib/utils'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,16 +53,18 @@ interface Collab {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const FILTERS = ['All', 'Pending', 'In Progress', 'Delivered', 'Revision', 'Completed', 'Cancelled']
+const FILTERS = ['All', 'Pending', 'In Progress', 'Delivered', 'Revision', 'Completed', 'Cancelled', 'Disputed', 'Cancel Pending']
 
 const STATUS_MAP: Record<string, string> = {
-  'All': '',
-  'In Progress': 'in_progress',
-  'Revision': 'revision_requested',
-  'Pending': 'pending',
-  'Completed': 'completed',
-  'Cancelled': 'cancelled',
-  'Delivered': 'delivered',
+  'All':            '',
+  'In Progress':    'in_progress',
+  'Revision':       'revision_requested',
+  'Pending':        'pending',
+  'Completed':      'completed',
+  'Cancelled':      'cancelled',
+  'Delivered':      'delivered',
+  'Disputed':       'disputed',
+  'Cancel Pending': 'cancellation_requested',
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -73,6 +75,7 @@ const STATUS_STYLES: Record<string, string> = {
   cancelled:               'text-red-400 bg-red-500/10',
   delivered:               'text-teal-400 bg-teal-500/10',
   cancellation_requested:  'text-orange-400 bg-orange-500/10',
+  disputed:                'text-red-400 bg-red-500/10',
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -83,6 +86,7 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled:               'Cancelled',
   delivered:               'Delivered',
   cancellation_requested:  'Cancel Pending',
+  disputed:                'Disputed',
 }
 
 const COLLAB_SELECT = `
@@ -124,6 +128,8 @@ function creatorOf(c: Collab): CollabProfile | null {
 
 export default function CollabsPage() {
   const { user } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const openParam = searchParams.get('open')
 
   // List state
   const [collabs, setCollabs]  = useState<Collab[]>([])
@@ -153,6 +159,13 @@ export default function CollabsPage() {
   const [cancelReason,     setCancelReason]     = useState('')
   const [cancelSubmitting, setCancelSubmitting] = useState(false)
   const [cancelError,      setCancelError]      = useState('')
+
+  // Dispute modal
+  const [showDispute,       setShowDispute]       = useState(false)
+  const [disputeReason,     setDisputeReason]     = useState('')
+  const [disputeSubmitting, setDisputeSubmitting] = useState(false)
+  const [disputeError,      setDisputeError]      = useState('')
+  const [disputeSuccessMsg, setDisputeSuccessMsg] = useState('')
 
   // Realtime channel ref — prevents stale channel on re-renders
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
@@ -194,6 +207,28 @@ export default function CollabsPage() {
       setCollabs(prev => prev.map(c => c.id === fresh.id ? fresh : c))
     }
   }, [user])
+
+  // ── Deep-link: ?open=<collabId> from notification CTA ───────────────────────
+
+  useEffect(() => {
+    if (!openParam || !user) return
+    const id = openParam.trim()
+    // Clean the URL immediately so refresh does not reopen the modal.
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      next.delete('open')
+      return next
+    }, { replace: true })
+    if (!id) return
+    supabase.from('collabs').select(COLLAB_SELECT)
+      .eq('id', id)
+      .eq('brand_id', user.id)  // ownership scope — never trust URL param alone
+      .single()
+      .then(({ data }) => {
+        if (data) openCollab(data as Collab)
+        // No match / unauthorized → silent no-op; normal list already rendered
+      })
+  }, [openParam, user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Realtime subscription for the open collab ─────────────────────────────
 
@@ -259,11 +294,15 @@ export default function CollabsPage() {
     setShowRevision(false)
     setShowApproval(false)
     setShowCancel(false)
+    setShowDispute(false)
     setRevisionReason('')
     setRevisionError('')
     setApprovalError('')
     setCancelReason('')
     setCancelError('')
+    setDisputeReason('')
+    setDisputeError('')
+    setDisputeSuccessMsg('')
   }
 
   function closeCollab() {
@@ -271,6 +310,7 @@ export default function CollabsPage() {
     setShowRevision(false)
     setShowApproval(false)
     setShowCancel(false)
+    setShowDispute(false)
   }
 
   // ── Revision ──────────────────────────────────────────────────────────────
@@ -399,6 +439,39 @@ export default function CollabsPage() {
     }
   }
 
+  // ── Dispute ───────────────────────────────────────────────────────────────
+
+  async function submitDispute() {
+    if (!selected || disputeSubmitting) return
+    const reason = disputeReason.trim()
+    if (!reason) { setDisputeError('Please describe the issue.'); return }
+    if (reason.length > 2000) { setDisputeError('Reason must be 2,000 characters or fewer.'); return }
+
+    setDisputeSubmitting(true)
+    setDisputeError('')
+    try {
+      const { data, error } = await supabase.functions.invoke('collab-dispute', {
+        body: { collab_id: selected.id, reason },
+      })
+      if (error || !data?.ok) {
+        const code = data?.error ?? ''
+        throw new Error(
+          code === 'already_disputed' ? 'This collaboration already has an open dispute.' :
+          code === 'invalid_status'   ? 'A dispute cannot be raised at this stage of the collaboration.' :
+          'Please try again or contact support.'
+        )
+      }
+      setShowDispute(false)
+      setDisputeReason('')
+      setDisputeSuccessMsg('Our team will review your case and get back to you within 24 hours.')
+      await reloadSelected(selected.id)
+    } catch (err: any) {
+      setDisputeError(err.message || 'Please try again or contact support.')
+    } finally {
+      setDisputeSubmitting(false)
+    }
+  }
+
   // ── Derived state ─────────────────────────────────────────────────────────
 
   const canRevise = selected
@@ -411,10 +484,13 @@ export default function CollabsPage() {
     && selected.payment_status === 'paid'
 
   const canCancel = selected
-    && !['cancelled', 'completed'].includes(selected.status)
+    && !['cancelled', 'completed', 'disputed'].includes(selected.status)
 
   const isCancelPending = selected?.status === 'cancellation_requested'
   const brandRequestedCancel = isCancelPending && selected?.cancellation_requested_by === user?.id
+
+  const canDispute = selected
+    && !['pending', 'cancelled', 'completed', 'disputed', 'cancellation_requested'].includes(selected.status)
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -510,7 +586,7 @@ export default function CollabsPage() {
       {/* ═══════════════════════════════════════════════════════════════════
           WORKSPACE MODAL
           ═══════════════════════════════════════════════════════════════════ */}
-      {selected && !showRevision && !showApproval && !showCancel && (
+      {selected && !showRevision && !showApproval && !showCancel && !showDispute && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-start justify-center p-4 overflow-y-auto">
           <div className="bg-gray-900 rounded-2xl border border-gray-800 w-full max-w-lg my-4">
 
@@ -757,6 +833,29 @@ export default function CollabsPage() {
                 </div>
               )}
 
+              {/* Disputed state */}
+              {selected.status === 'disputed' && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle size={16} className="text-red-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-red-400">Dispute under review</p>
+                      <p className="text-sm text-gray-300 mt-1 leading-relaxed">
+                        This collaboration is currently under dispute review. Further action may be required after the issue is reviewed.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Dispute raised confirmation */}
+              {disputeSuccessMsg && (
+                <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-3 flex items-start gap-2">
+                  <CheckCircle2 size={14} className="text-green-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-green-400">{disputeSuccessMsg}</p>
+                </div>
+              )}
+
               {/* Action buttons */}
               {!['cancelled', 'completed'].includes(selected.status) && !isCancelPending && (
                 <div className="space-y-2 pt-1">
@@ -780,6 +879,14 @@ export default function CollabsPage() {
                       onClick={() => { setCancelError(''); setCancelReason(''); setShowCancel(true) }}
                       className="w-full py-2.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-red-400 text-sm font-medium transition-colors">
                       Cancel Collaboration
+                    </button>
+                  )}
+                  {canDispute && (
+                    <button
+                      onClick={() => { setDisputeError(''); setDisputeReason(''); setShowDispute(true) }}
+                      className="w-full py-2.5 rounded-xl border border-gray-700 hover:border-red-500/40 text-gray-500 hover:text-red-400 text-sm font-medium transition-colors flex items-center justify-center gap-2">
+                      <AlertTriangle size={15} />
+                      Report an Issue
                     </button>
                   )}
                 </div>
@@ -955,6 +1062,62 @@ export default function CollabsPage() {
                   className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-medium transition-colors flex items-center justify-center gap-2">
                   {cancelSubmitting && <Loader2 size={16} className="animate-spin" />}
                   {isUnpaid ? 'Cancel Collab' : 'Send Request'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          DISPUTE MODAL
+          ═══════════════════════════════════════════════════════════════════ */}
+      {selected && showDispute && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 rounded-2xl border border-gray-800 w-full max-w-md">
+            <div className="flex items-center justify-between p-5 border-b border-gray-800">
+              <h2 className="font-bold text-white text-lg">Report an Issue</h2>
+              <button onClick={() => setShowDispute(false)} disabled={disputeSubmitting}
+                className="text-gray-500 hover:text-white">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-gray-400 leading-relaxed">
+                Describe the issue clearly. Our support team will review the collaboration and messages between you and the creator.
+              </p>
+              <div>
+                <textarea
+                  rows={4}
+                  value={disputeReason}
+                  onChange={e => setDisputeReason(e.target.value)}
+                  maxLength={2000}
+                  placeholder="e.g. Creator is unresponsive, or the deliverable does not match the agreed brief…"
+                  className="bg-gray-800 text-gray-100 placeholder-gray-500 border border-gray-700 rounded-xl px-4 py-3 w-full focus:outline-none focus:border-purple-600 transition-colors resize-none"
+                />
+                <p className="text-xs text-gray-600 text-right mt-1">{disputeReason.length}/2000</p>
+              </div>
+              <div className="flex items-start gap-2 bg-gray-800/50 rounded-xl p-3">
+                <AlertCircle size={14} className="text-gray-500 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-gray-500 leading-relaxed">Raising a dispute pauses payment release until our team resolves it. Misuse may affect your account.</p>
+              </div>
+              {disputeError && (
+                <div className="flex items-start gap-2 text-xs text-red-400 bg-red-500/10 rounded-xl p-3">
+                  <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+                  <span>{disputeError}</span>
+                </div>
+              )}
+              <div className="flex gap-3">
+                <button onClick={() => setShowDispute(false)} disabled={disputeSubmitting}
+                  className="btn-secondary flex-1">
+                  Cancel
+                </button>
+                <button
+                  onClick={submitDispute}
+                  disabled={disputeSubmitting || !disputeReason.trim()}
+                  className="btn-primary flex-1 flex items-center justify-center gap-2">
+                  {disputeSubmitting && <Loader2 size={16} className="animate-spin" />}
+                  {disputeSubmitting ? 'Submitting…' : 'Submit to Support'}
                 </button>
               </div>
             </div>

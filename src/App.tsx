@@ -2,7 +2,8 @@ import React from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 
-// Auth
+// Auth — public auth routes are locked pending launch
+import ComingSoonPage   from './pages/ComingSoonPage'
 import LoginPage       from './pages/auth/LoginPage'
 import BrandSignupPage  from './pages/auth/BrandSignupPage'
 import CreatorSignupPage from './pages/auth/CreatorSignupPage'
@@ -57,10 +58,10 @@ function AppRoutes() {
       {/* Root */}
       <Route path="/" element={<RootRedirect />} />
 
-      {/* Auth */}
-      <Route path="/login"           element={<LoginPage />} />
-      <Route path="/signup/brand"    element={<BrandSignupPage />} />
-      <Route path="/signup/creator"  element={<CreatorSignupPage />} />
+      {/* Auth — locked until launch */}
+      <Route path="/login"           element={<ComingSoonPage />} />
+      <Route path="/signup/brand"    element={<ComingSoonPage />} />
+      <Route path="/signup/creator"  element={<ComingSoonPage />} />
 
       {/* Brand routes */}
       <Route path="/brand" element={<ProtectedBrand><BrandDashboardPage /></ProtectedBrand>} />

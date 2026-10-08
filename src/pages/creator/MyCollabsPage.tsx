@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react'
 import {
   FileText, MessageSquare, ChevronLeft, Clock,
   AlertTriangle, CheckCircle2, ExternalLink, Loader2,
-  X, Plus, UploadCloud, Ban,
+  X, Plus, UploadCloud, Ban, Zap, Shield,
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import CreatorLayout from '../../components/CreatorLayout'
@@ -71,18 +71,44 @@ interface Collab {
   profiles: BrandProfile | BrandProfile[] | null
 }
 
+interface HireRequest {
+  id: string
+  brand_id: string
+  creator_id: string
+  content_type: string
+  deliverables: any[] | null
+  timeline: string | null
+  platform: string | null
+  addons: any[] | null
+  brief: string | null
+  total_amount: number
+  platform_fee: number | null
+  creator_payout: number | null
+  status: string
+  payment_status: string
+  expires_at: string
+  created_at: string
+  responded_at: string | null
+  collab_id: string | null
+  refund_ref: string | null
+  refunded_at: string | null
+  profiles: BrandProfile | BrandProfile[] | null
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const FILTERS = ['All', 'In Progress', 'Revision', 'Delivered', 'Completed', 'Pending', 'Cancelled']
+const FILTERS = ['All', 'In Progress', 'Revision', 'Delivered', 'Completed', 'Pending', 'Cancelled', 'Disputed', 'Cancel Pending']
 
 const STATUS_MAP: Record<string, string> = {
-  'All':         '',
-  'In Progress': 'in_progress',
-  'Revision':    'revision_requested',
-  'Delivered':   'delivered',
-  'Completed':   'completed',
-  'Pending':     'pending',
-  'Cancelled':   'cancelled',
+  'All':            '',
+  'In Progress':    'in_progress',
+  'Revision':       'revision_requested',
+  'Delivered':      'delivered',
+  'Completed':      'completed',
+  'Pending':        'pending',
+  'Cancelled':      'cancelled',
+  'Disputed':       'disputed',
+  'Cancel Pending': 'cancellation_requested',
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -93,6 +119,7 @@ const STATUS_STYLES: Record<string, string> = {
   pending:                'text-blue-400 bg-blue-500/10',
   cancelled:              'text-red-400 bg-red-500/10',
   cancellation_requested: 'text-orange-400 bg-orange-500/10',
+  disputed:               'text-red-400 bg-red-500/10',
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -103,6 +130,7 @@ const STATUS_LABELS: Record<string, string> = {
   pending:                'Pending',
   cancelled:              'Cancelled',
   cancellation_requested: 'Cancel Pending',
+  disputed:               'Disputed',
 }
 
 const COLLAB_SELECT = `
@@ -118,6 +146,9 @@ const COLLAB_SELECT = `
   platforms, addons,
   profiles:brand_id(company_name, avatar_url)
 `
+
+const HIRE_LIST_SELECT = 'id, content_type, creator_payout, total_amount, timeline, brand_id, status, payment_status, expires_at, created_at, profiles:brand_id(company_name, avatar_url)'
+const HIRE_DETAIL_SELECT = 'id, brand_id, creator_id, content_type, deliverables, timeline, platform, addons, brief, total_amount, platform_fee, creator_payout, status, payment_status, expires_at, created_at, responded_at, collab_id, refund_ref, refunded_at, profiles:brand_id(company_name, avatar_url)'
 
 const MAX_CANCEL_REASON = 2000
 
@@ -153,7 +184,7 @@ function safeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120)
 }
 
-// ── Cancellation error mapping ────────────────────────────────────────────────
+// ── Error mappers ─────────────────────────────────────────────────────────────
 
 function friendlyCancelError(code: string): string {
   const map: Record<string, string> = {
@@ -178,6 +209,33 @@ function friendlyCancelError(code: string): string {
   return map[code] ?? `An error occurred (${code}). Please try again.`
 }
 
+function friendlyHireError(code: string): string {
+  const map: Record<string, string> = {
+    hire_request_not_found:       'This hire request no longer exists.',
+    forbidden:                    'You are not authorised to act on this request.',
+    hire_request_not_pending:     'This request has already been responded to.',
+    hire_request_not_paid:        "The brand's payment has not cleared yet.",
+    hire_request_expired:         'This request has expired.',
+    hire_request_being_processed: 'This request is being processed. Please try again in a moment.',
+  }
+  return map[code] ?? 'Something went wrong. Please try again.'
+}
+
+// ── Hire countdown helper ─────────────────────────────────────────────────────
+
+function hireTimeLeft(expiresAt: string): { text: string; urgent: boolean; expired: boolean } {
+  const remaining = new Date(expiresAt).getTime() - Date.now()
+  if (remaining <= 0) return { text: 'Expired', urgent: true, expired: true }
+  const h = Math.floor(remaining / 3_600_000)
+  const m = Math.floor((remaining % 3_600_000) / 60_000)
+  const urgent = remaining < 4 * 3_600_000
+  return {
+    text: h > 0 ? `${h}h ${m}m left` : m > 0 ? `${m}m left` : 'Expires soon',
+    urgent,
+    expired: false,
+  }
+}
+
 // ── Signed URL cache (module-level, survives re-renders) ──────────────────────
 
 const urlCache: Record<string, { url: string; expiresAt: number }> = {}
@@ -198,7 +256,7 @@ async function getSignedUrl(collabId: string, storagePath: string): Promise<stri
   }
 }
 
-function brandOf(c: Collab): BrandProfile | null {
+function brandOf(c: { profiles?: BrandProfile | BrandProfile[] | null }): BrandProfile | null {
   if (!c.profiles) return null
   return Array.isArray(c.profiles) ? c.profiles[0] ?? null : c.profiles
 }
@@ -232,11 +290,30 @@ export default function MyCollabsPage() {
   const [cancelActionError,    setCancelActionError]    = useState('')
   const [countdown,            setCountdown]            = useState('')
 
+  // Dispute state
+  const [disputeModalOpen,  setDisputeModalOpen]  = useState(false)
+  const [disputeReason,     setDisputeReason]     = useState('')
+  const [disputeSubmitting, setDisputeSubmitting] = useState(false)
+  const [disputeError,      setDisputeError]      = useState('')
+  const [disputeSuccessMsg, setDisputeSuccessMsg] = useState('')
+
   const [openError, setOpenError] = useState('')
+
+  // Hire request state
+  const [pendingHireRequests, setPendingHireRequests] = useState<HireRequest[]>([])
+  const [hireLoading,         setHireLoading]         = useState(true)
+  const [selectedHireRequest, setSelectedHireRequest] = useState<HireRequest | null>(null)
+  const [hireDetailLoading,   setHireDetailLoading]   = useState(false)
+  const [hireAction,          setHireAction]          = useState<'accept' | 'decline' | null>(null)
+  const [hireError,           setHireError]           = useState<string | null>(null)
+  const [hireSuccess,         setHireSuccess]         = useState<string | null>(null)
+  const [hireCountdown,       setHireCountdown]       = useState('')
+  const hireActionRef  = useRef(false)
+  const hireChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
-  // ── Load list ───────────────────────────────────────────────────────────────
+  // ── Load collabs ─────────────────────────────────────────────────────────────
 
   const load = useCallback(async () => {
     if (!user) return
@@ -255,7 +332,25 @@ export default function MyCollabsPage() {
 
   useEffect(() => { load() }, [load])
 
-  // ── Reload selected collab ────────────────────────────────────────────────
+  // ── Load hire requests ────────────────────────────────────────────────────────
+
+  const loadHireRequests = useCallback(async () => {
+    if (!user) return
+    setHireLoading(true)
+    const { data } = await supabase
+      .from('hire_requests')
+      .select(HIRE_LIST_SELECT)
+      .eq('creator_id', user.id)
+      .eq('status', 'pending')
+      .eq('payment_status', 'paid')
+      .order('created_at', { ascending: false })
+    setPendingHireRequests((data || []) as HireRequest[])
+    setHireLoading(false)
+  }, [user])
+
+  useEffect(() => { loadHireRequests() }, [loadHireRequests])
+
+  // ── Reload selected collab ────────────────────────────────────────────────────
 
   const reloadSelected = useCallback(async (id: string) => {
     if (!user) return
@@ -272,11 +367,12 @@ export default function MyCollabsPage() {
     }
   }, [user])
 
-  // ── Auto-open from ?open= param ───────────────────────────────────────────
+  // ── Auto-open from ?open= param ───────────────────────────────────────────────
   // Watches the live query param so both cold page loads and in-app navigations
   // (e.g. from a notification click) trigger the workspace open correctly.
 
   const openParam = searchParams.get('open')
+  const hireParam = searchParams.get('hire')
 
   useEffect(() => {
     if (!openParam || !user) return
@@ -305,7 +401,35 @@ export default function MyCollabsPage() {
       })
   }, [openParam, user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Realtime subscription ─────────────────────────────────────────────────
+  // ── Auto-open from ?hire= param ───────────────────────────────────────────────
+  // Triggered by notification clicks for Direct Hire requests.
+  // The hireRequestId is a lookup hint only — ownership is enforced by the
+  // creator_id scope on the fetch, not by the URL parameter itself.
+
+  useEffect(() => {
+    if (!hireParam || !user) return
+    const id = hireParam.trim()
+
+    // Remove the param from the URL immediately so back/refresh is clean.
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      next.delete('hire')
+      return next
+    }, { replace: true })
+
+    if (!id) return
+
+    supabase.from('hire_requests').select(HIRE_DETAIL_SELECT)
+      .eq('id', id)
+      .eq('creator_id', user.id) // ownership scope — never rely on the URL param alone
+      .single()
+      .then(({ data }) => {
+        if (data) openHireRequestFull(data as HireRequest)
+        // No data → hire request doesn't exist or belongs to another creator — silent no-op.
+      })
+  }, [hireParam, user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Realtime: collab subscription ─────────────────────────────────────────────
 
   useEffect(() => {
     if (channelRef.current) {
@@ -336,7 +460,33 @@ export default function MyCollabsPage() {
     }
   }, [selected?.id])
 
-  // ── Signed URLs (re-runs when delivery lands) ─────────────────────────────
+  // ── Realtime: hire requests subscription ──────────────────────────────────────
+
+  useEffect(() => {
+    if (hireChannelRef.current) {
+      supabase.removeChannel(hireChannelRef.current)
+      hireChannelRef.current = null
+    }
+    if (!user) return
+
+    const ch = supabase
+      .channel(`creator-hire-${user.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'hire_requests',
+        filter: `creator_id=eq.${user.id}`,
+      }, () => { loadHireRequests() })
+      .subscribe()
+
+    hireChannelRef.current = ch
+    return () => {
+      supabase.removeChannel(ch)
+      hireChannelRef.current = null
+    }
+  }, [user?.id, loadHireRequests])
+
+  // ── Signed URLs (re-runs when delivery lands) ─────────────────────────────────
 
   useEffect(() => {
     if (!selected) { setSignedUrls({}); return }
@@ -354,7 +504,7 @@ export default function MyCollabsPage() {
     })
   }, [selected?.id, selected?.delivered_at])
 
-  // ── Countdown for cancellation expiry ─────────────────────────────────────
+  // ── Countdown: cancellation expiry ────────────────────────────────────────────
   // Informational only — does not automatically change collaboration state.
   // Reloads from server once when the timer reaches zero to reconcile state.
 
@@ -382,9 +532,36 @@ export default function MyCollabsPage() {
     return () => clearInterval(interval)
   }, [selected?.id, selected?.cancellation_expires_at, reloadSelected])
 
-  // ── Open / close ──────────────────────────────────────────────────────────
+  // ── Countdown: hire request expiry ────────────────────────────────────────────
+  // Updates every 60 seconds — UI only, backend expiry check is authoritative.
+  // Reloads hire list once when the timer reaches zero.
+
+  useEffect(() => {
+    if (!selectedHireRequest?.expires_at) { setHireCountdown(''); return }
+    const expiresAt = new Date(selectedHireRequest.expires_at).getTime()
+    let reloaded = false
+
+    function tick() {
+      const remaining = expiresAt - Date.now()
+      if (remaining <= 0) {
+        setHireCountdown('Expired')
+        if (!reloaded) { reloaded = true; loadHireRequests() }
+        return
+      }
+      const h = Math.floor(remaining / 3_600_000)
+      const m = Math.floor((remaining % 3_600_000) / 60_000)
+      setHireCountdown(h > 0 ? `${h}h ${m}m to respond` : `${m}m to respond`)
+    }
+
+    tick()
+    const interval = setInterval(tick, 60_000)
+    return () => clearInterval(interval)
+  }, [selectedHireRequest?.id, selectedHireRequest?.expires_at, loadHireRequests])
+
+  // ── Open / close collab ───────────────────────────────────────────────────────
 
   function openCollab(c: Collab) {
+    setSelectedHireRequest(null)
     setSelected(c)
     setSignedUrls({})
     setDeliveryFiles([])
@@ -393,6 +570,10 @@ export default function MyCollabsPage() {
     setCancelReason('')
     setCancelError('')
     setCancelActionError('')
+    setDisputeModalOpen(false)
+    setDisputeReason('')
+    setDisputeError('')
+    setDisputeSuccessMsg('')
   }
 
   function closeCollab() {
@@ -403,9 +584,110 @@ export default function MyCollabsPage() {
     setCancelReason('')
     setCancelError('')
     setCancelActionError('')
+    setDisputeModalOpen(false)
+    setDisputeReason('')
+    setDisputeError('')
+    setDisputeSuccessMsg('')
   }
 
-  // ── Delivery file handling ────────────────────────────────────────────────
+  // ── Open / close hire request ─────────────────────────────────────────────────
+
+  async function openHireRequestFull(hr: HireRequest) {
+    setSelected(null)
+    setSelectedHireRequest(hr)
+    setHireDetailLoading(true)
+    setHireError(null)
+    setHireSuccess(null)
+    if (!user) return
+    const { data } = await supabase
+      .from('hire_requests')
+      .select(HIRE_DETAIL_SELECT)
+      .eq('id', hr.id)
+      .eq('creator_id', user.id)
+      .single()
+    if (!data) {
+      setSelectedHireRequest(null)
+      loadHireRequests()
+      return
+    }
+    setSelectedHireRequest(data as HireRequest)
+    setHireDetailLoading(false)
+  }
+
+  function closeHireRequest() {
+    setSelectedHireRequest(null)
+    setHireError(null)
+    setHireDetailLoading(false)
+    hireActionRef.current = false
+  }
+
+  // ── Hire request: accept ──────────────────────────────────────────────────────
+
+  async function acceptHireRequest() {
+    if (!selectedHireRequest || !user || hireAction !== null || hireActionRef.current) return
+    hireActionRef.current = true
+    setHireAction('accept')
+    setHireError(null)
+    const id = selectedHireRequest.id
+    try {
+      const { data, error } = await supabase.rpc('accept_hire_request', {
+        p_hire_request_id: id,
+      })
+      if (error) throw new Error(friendlyHireError('generic'))
+      if (!data?.ok) {
+        const errCode = (data?.error ?? '') as string
+        if (['hire_request_expired', 'hire_request_not_pending', 'hire_request_not_found'].includes(errCode)) {
+          loadHireRequests()
+        }
+        throw new Error(friendlyHireError(errCode))
+      }
+      closeHireRequest()
+      setPendingHireRequests(prev => prev.filter(r => r.id !== id))
+      setSearchParams(prev => {
+        const next = new URLSearchParams(prev)
+        next.set('open', data.collab_id)
+        return next
+      })
+    } catch (err: unknown) {
+      setHireError(err instanceof Error ? err.message : 'Failed to accept. Please try again.')
+    } finally {
+      setHireAction(null)
+      hireActionRef.current = false
+    }
+  }
+
+  // ── Hire request: decline ─────────────────────────────────────────────────────
+
+  async function declineHireRequest() {
+    if (!selectedHireRequest || !user || hireAction !== null || hireActionRef.current) return
+    hireActionRef.current = true
+    setHireAction('decline')
+    setHireError(null)
+    const id = selectedHireRequest.id
+    try {
+      const { data, error } = await supabase.rpc('decline_hire_request', {
+        p_hire_request_id: id,
+      })
+      if (error) throw new Error(friendlyHireError('generic'))
+      if (!data?.ok) {
+        const errCode = (data?.error ?? '') as string
+        if (['hire_request_expired', 'hire_request_not_pending', 'hire_request_not_found'].includes(errCode)) {
+          loadHireRequests()
+        }
+        throw new Error(friendlyHireError(errCode))
+      }
+      closeHireRequest()
+      setPendingHireRequests(prev => prev.filter(r => r.id !== id))
+      setHireSuccess("Request declined. The brand's payment has been refunded.")
+    } catch (err: unknown) {
+      setHireError(err instanceof Error ? err.message : 'Failed to decline. Please try again.')
+    } finally {
+      setHireAction(null)
+      hireActionRef.current = false
+    }
+  }
+
+  // ── Delivery file handling ────────────────────────────────────────────────────
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? [])
@@ -434,7 +716,7 @@ export default function MyCollabsPage() {
     setDeliveryFiles(prev => prev.filter(f => f.id !== id))
   }
 
-  // ── Submit delivery ───────────────────────────────────────────────────────
+  // ── Submit delivery ───────────────────────────────────────────────────────────
 
   async function submitDelivery() {
     if (!selected || !user || deliverySubmitting) return
@@ -486,7 +768,7 @@ export default function MyCollabsPage() {
     }
   }
 
-  // ── Cancellation: request ─────────────────────────────────────────────────
+  // ── Cancellation: request ─────────────────────────────────────────────────────
 
   async function requestCancellation() {
     if (!selected || !user || cancelSubmitting) return
@@ -515,7 +797,7 @@ export default function MyCollabsPage() {
     }
   }
 
-  // ── Cancellation: accept ──────────────────────────────────────────────────
+  // ── Cancellation: accept ──────────────────────────────────────────────────────
 
   async function acceptCancellation() {
     if (!selected || !user || cancelActionLoading) return
@@ -536,7 +818,7 @@ export default function MyCollabsPage() {
     }
   }
 
-  // ── Cancellation: decline ─────────────────────────────────────────────────
+  // ── Cancellation: decline ─────────────────────────────────────────────────────
 
   async function declineCancellation() {
     if (!selected || !user || cancelActionLoading) return
@@ -557,7 +839,40 @@ export default function MyCollabsPage() {
     }
   }
 
-  // ── Derived ───────────────────────────────────────────────────────────────
+  // ── Dispute ───────────────────────────────────────────────────────────────────
+
+  async function raiseDispute() {
+    if (!selected || !user || disputeSubmitting) return
+    const reason = disputeReason.trim()
+    if (!reason) { setDisputeError('Please describe the issue.'); return }
+    if (reason.length > 2000) { setDisputeError('Reason must be 2,000 characters or fewer.'); return }
+
+    setDisputeSubmitting(true)
+    setDisputeError('')
+    try {
+      const { data, error } = await supabase.functions.invoke('collab-dispute', {
+        body: { collab_id: selected.id, reason },
+      })
+      if (error || !data?.ok) {
+        const code = data?.error ?? ''
+        throw new Error(
+          code === 'already_disputed' ? 'This collaboration already has an open dispute.' :
+          code === 'invalid_status'   ? 'A dispute cannot be raised at this stage of the collaboration.' :
+          'Please try again or contact support.'
+        )
+      }
+      setDisputeModalOpen(false)
+      setDisputeReason('')
+      setDisputeSuccessMsg('Our team will review your case and get back to you within 24 hours.')
+      await reloadSelected(selected.id)
+    } catch (err: unknown) {
+      setDisputeError(err instanceof Error ? err.message : 'Please try again or contact support.')
+    } finally {
+      setDisputeSubmitting(false)
+    }
+  }
+
+  // ── Derived ───────────────────────────────────────────────────────────────────
 
   const canDeliver = selected !== null
     && selected.payment_status === 'paid'
@@ -576,9 +891,19 @@ export default function MyCollabsPage() {
     selected?.status === 'cancellation_requested' &&
     selected?.cancellation_requested_by !== user?.id
 
-  const isBusy = deliverySubmitting || cancelSubmitting || cancelActionLoading !== null
+  const canRaiseDispute = selected !== null
+    && ['in_progress', 'delivered', 'revision_requested'].includes(selected.status)
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  const isBusy = deliverySubmitting || cancelSubmitting || cancelActionLoading !== null || disputeSubmitting
+
+  const hireIsExpired = selectedHireRequest
+    ? new Date(selectedHireRequest.expires_at).getTime() <= Date.now() || hireCountdown === 'Expired'
+    : false
+  const hireIsUrgent = !hireIsExpired && selectedHireRequest
+    ? (new Date(selectedHireRequest.expires_at).getTime() - Date.now()) < 4 * 3_600_000
+    : false
+
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
     <CreatorLayout>
@@ -592,6 +917,79 @@ export default function MyCollabsPage() {
         <div className="flex items-center justify-between bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 mb-4 text-sm text-red-400">
           <span>{openError}</span>
           <button onClick={() => setOpenError('')} className="ml-3 text-red-400 hover:text-red-300 flex-shrink-0">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* ── DIRECT HIRE REQUESTS ─────────────────────────────────────────────── */}
+      {(hireLoading || pendingHireRequests.length > 0) && (
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-3">
+            <Zap size={14} className="text-amber-400" />
+            <h2 className="text-sm font-semibold text-white">Direct Hire Requests</h2>
+            {pendingHireRequests.length > 0 && (
+              <span className="bg-amber-500/15 text-amber-400 text-xs font-semibold px-2 py-0.5 rounded-full">
+                {pendingHireRequests.length}
+              </span>
+            )}
+          </div>
+
+          {hireLoading ? (
+            <div className="card h-20 animate-pulse" />
+          ) : (
+            <div className="space-y-3">
+              {pendingHireRequests.map(hr => {
+                const brand = brandOf(hr)
+                const timeLeft = hireTimeLeft(hr.expires_at)
+                return (
+                  <button key={hr.id} onClick={() => openHireRequestFull(hr)}
+                    className="card w-full text-left hover:border-amber-700/40 transition-colors cursor-pointer">
+                    <div className="flex items-center gap-4">
+                      <Avatar name={brand?.company_name || 'Brand'} size="md" avatarUrl={brand?.avatar_url} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                          <p className="font-semibold text-white truncate">{brand?.company_name || 'Brand'}</p>
+                          <span className="flex items-center gap-1 text-xs font-semibold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">
+                            <Zap size={10} /> Direct Hire
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
+                          <span>{hr.content_type}</span>
+                          {hr.creator_payout
+                            ? <span className="font-semibold text-green-400">{formatAmount(hr.creator_payout)}</span>
+                            : <span className="font-semibold text-white">{formatAmount(hr.total_amount)}</span>}
+                          {hr.timeline && <span>{hr.timeline}</span>}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                        <span className={`text-xs flex items-center gap-1 ${
+                          timeLeft.expired ? 'text-red-400' :
+                          timeLeft.urgent  ? 'text-amber-400 font-medium' :
+                          'text-gray-500'
+                        }`}>
+                          <Clock size={11} />
+                          {timeLeft.text}
+                        </span>
+                        <span className="text-xs text-purple-400 font-medium">Review →</span>
+                      </div>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Decline success banner */}
+      {hireSuccess && (
+        <div className="flex items-center justify-between bg-green-500/10 border border-green-500/20 rounded-xl px-4 py-3 mb-4 text-sm text-green-400">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={14} className="flex-shrink-0" />
+            <span>{hireSuccess}</span>
+          </div>
+          <button onClick={() => setHireSuccess(null)} className="ml-3 text-green-400 hover:text-green-300 flex-shrink-0">
             <X size={14} />
           </button>
         </div>
@@ -631,7 +1029,7 @@ export default function MyCollabsPage() {
             const brand = brandOf(c)
             const miles = c.milestones || []
             const paidMiles = miles.filter((m: any) => m.paid).length
-            const needsAction = c.status === 'revision_requested' || c.status === 'cancellation_requested'
+            const needsAction = c.status === 'revision_requested' || c.status === 'cancellation_requested' || c.status === 'disputed'
             return (
               <button key={c.id} onClick={() => openCollab(c)}
                 className="card w-full text-left hover:border-gray-700 transition-colors cursor-pointer">
@@ -1027,6 +1425,29 @@ export default function MyCollabsPage() {
                 </div>
               )}
 
+              {/* Disputed state */}
+              {selected.status === 'disputed' && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle size={16} className="text-red-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-red-400">Dispute under review</p>
+                      <p className="text-sm text-gray-300 mt-1 leading-relaxed">
+                        This collaboration is currently under dispute review. Further action may be required after the issue is reviewed.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Dispute raised confirmation */}
+              {disputeSuccessMsg && (
+                <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-3 flex items-start gap-2">
+                  <CheckCircle2 size={14} className="text-green-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-green-400">{disputeSuccessMsg}</p>
+                </div>
+              )}
+
               {/* Pending / awaiting payment */}
               {selected.status === 'pending' && selected.payment_status === 'unpaid' && (
                 <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-center gap-2">
@@ -1112,6 +1533,18 @@ export default function MyCollabsPage() {
                 </div>
               )}
 
+              {canRaiseDispute && (
+                <div className={canRequestCancel ? 'pt-2' : 'border-t border-gray-800 pt-4'}>
+                  <button
+                    onClick={() => { setDisputeError(''); setDisputeReason(''); setDisputeModalOpen(true) }}
+                    disabled={isBusy}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-gray-700 hover:border-red-500/40 text-gray-500 hover:text-red-400 text-sm font-medium transition-colors disabled:opacity-40">
+                    <AlertTriangle size={15} />
+                    Report an Issue
+                  </button>
+                </div>
+              )}
+
             </div>
           </div>
         </div>
@@ -1178,6 +1611,254 @@ export default function MyCollabsPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          DISPUTE MODAL (z-60, above workspace)
+          ═══════════════════════════════════════════════════════════════════ */}
+      {selected && disputeModalOpen && (
+        <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
+          <div className="bg-gray-900 rounded-2xl border border-gray-800 w-full max-w-sm">
+            <div className="flex items-center justify-between p-4 border-b border-gray-800">
+              <p className="font-semibold text-white">Report an Issue</p>
+              <button onClick={() => { setDisputeModalOpen(false); setDisputeReason(''); setDisputeError('') }}
+                disabled={disputeSubmitting}
+                className="text-gray-500 hover:text-white p-1 rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-40">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              <p className="text-sm text-gray-400 leading-relaxed">
+                Describe the issue clearly. Our support team will review the collaboration and messages between you and the brand.
+              </p>
+
+              <div>
+                <textarea
+                  value={disputeReason}
+                  onChange={e => setDisputeReason(e.target.value)}
+                  disabled={disputeSubmitting}
+                  maxLength={2000}
+                  rows={4}
+                  placeholder="Describe the issue…"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-gray-600 resize-none focus:outline-none focus:border-gray-600 disabled:opacity-50"
+                />
+                <p className="text-xs mt-1 text-right text-gray-600">{disputeReason.length}/2000</p>
+              </div>
+
+              <div className="flex items-start gap-2 bg-gray-800/50 rounded-xl p-3">
+                <Shield size={13} className="text-gray-500 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-gray-500 leading-relaxed">Raising a dispute pauses payment release until our team resolves it. Misuse may affect your account.</p>
+              </div>
+
+              {disputeError && (
+                <div className="flex items-start gap-2 text-xs text-red-400 bg-red-500/10 rounded-xl p-3">
+                  <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
+                  <span>{disputeError}</span>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => { setDisputeModalOpen(false); setDisputeReason(''); setDisputeError('') }}
+                  disabled={disputeSubmitting}
+                  className="flex-1 py-2.5 rounded-xl border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600 text-sm font-medium transition-colors disabled:opacity-50">
+                  Cancel
+                </button>
+                <button
+                  onClick={raiseDispute}
+                  disabled={disputeSubmitting || !disputeReason.trim()}
+                  className="flex-1 py-2.5 rounded-xl bg-red-600/80 hover:bg-red-600 text-white text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+                  {disputeSubmitting
+                    ? <><Loader2 size={14} className="animate-spin" /> Submitting…</>
+                    : 'Submit to Support'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          HIRE REQUEST DETAIL MODAL
+          ═══════════════════════════════════════════════════════════════════ */}
+      {selectedHireRequest && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-start justify-center p-4 overflow-y-auto">
+          <div className="bg-gray-900 rounded-2xl border border-gray-800 w-full max-w-lg my-4">
+
+            {/* Header */}
+            <div className="flex items-center gap-3 p-5 border-b border-gray-800">
+              <button onClick={closeHireRequest} disabled={hireAction !== null}
+                className="text-gray-500 hover:text-white -ml-1 p-1 rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50">
+                <ChevronLeft size={20} />
+              </button>
+              {(() => {
+                const brand = brandOf(selectedHireRequest)
+                return (
+                  <>
+                    <Avatar name={brand?.company_name || 'Brand'} size="sm" avatarUrl={brand?.avatar_url} />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-white truncate">{brand?.company_name || 'Brand'}</p>
+                      <p className="text-xs text-gray-500">{selectedHireRequest.content_type}</p>
+                    </div>
+                  </>
+                )
+              })()}
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-full flex-shrink-0">
+                <Zap size={11} /> Direct Hire
+              </span>
+            </div>
+
+            {/* Detail loading skeleton */}
+            {hireDetailLoading && (
+              <div className="p-5 space-y-3">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="h-16 bg-gray-800/50 rounded-xl animate-pulse" />
+                ))}
+              </div>
+            )}
+
+            {!hireDetailLoading && (
+              <div className="p-5 space-y-5">
+
+                {/* Countdown / expiry banner */}
+                {hireCountdown && (
+                  <div className={`flex items-center gap-2 rounded-xl px-4 py-3 ${
+                    hireIsExpired
+                      ? 'bg-red-500/10 border border-red-500/20'
+                      : hireIsUrgent
+                      ? 'bg-amber-500/10 border border-amber-500/20'
+                      : 'bg-blue-500/10 border border-blue-500/20'
+                  }`}>
+                    <Clock size={14} className={
+                      hireIsExpired ? 'text-red-400' :
+                      hireIsUrgent  ? 'text-amber-400' :
+                      'text-blue-400'
+                    } />
+                    <p className={`text-sm font-medium ${
+                      hireIsExpired ? 'text-red-400' :
+                      hireIsUrgent  ? 'text-amber-400' :
+                      'text-blue-400'
+                    }`}>
+                      {hireIsExpired ? 'This request has expired' : hireCountdown}
+                    </p>
+                  </div>
+                )}
+
+                {/* Summary grid */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-gray-800/50 rounded-xl p-3">
+                    <p className="text-xs text-gray-500 mb-1">Service</p>
+                    <p className="text-sm font-medium text-white">{selectedHireRequest.content_type}</p>
+                  </div>
+                  <div className="bg-gray-800/50 rounded-xl p-3">
+                    <p className="text-xs text-gray-500 mb-1">Your Payout</p>
+                    <p className="text-sm font-semibold text-green-400">
+                      {selectedHireRequest.creator_payout
+                        ? formatAmount(selectedHireRequest.creator_payout)
+                        : formatAmount(selectedHireRequest.total_amount)}
+                    </p>
+                  </div>
+                  {selectedHireRequest.timeline && (
+                    <div className="bg-gray-800/50 rounded-xl p-3">
+                      <p className="text-xs text-gray-500 mb-1">Timeline</p>
+                      <p className="text-sm font-medium text-white">{selectedHireRequest.timeline}</p>
+                    </div>
+                  )}
+                  <div className="bg-gray-800/50 rounded-xl p-3">
+                    <p className="text-xs text-gray-500 mb-1">Total Value</p>
+                    <p className="text-sm font-medium text-white">{formatAmount(selectedHireRequest.total_amount)}</p>
+                  </div>
+                </div>
+
+                {/* Platform */}
+                {selectedHireRequest.platform && (
+                  <div>
+                    <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide">Platform</p>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedHireRequest.platform.split(',').map(p => p.trim()).filter(Boolean).map(p => (
+                        <span key={p} className="text-xs bg-gray-800 text-gray-300 px-3 py-1 rounded-full">{p}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Brief */}
+                {selectedHireRequest.brief && (
+                  <div>
+                    <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide">Brief</p>
+                    <div className="bg-gray-800/50 rounded-xl p-3">
+                      <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-line">{selectedHireRequest.brief}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Deliverables */}
+                {selectedHireRequest.deliverables && selectedHireRequest.deliverables.length > 0 && (
+                  <div>
+                    <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide">Deliverables</p>
+                    <div className="space-y-1.5">
+                      {(selectedHireRequest.deliverables as any[]).map((d, i) => (
+                        <div key={i} className="flex items-center gap-2 bg-gray-800/50 rounded-xl px-3 py-2">
+                          <CheckCircle2 size={13} className="text-purple-400 flex-shrink-0" />
+                          <p className="text-sm text-gray-300">
+                            {typeof d === 'string' ? d : d?.label ?? String(d)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Escrow notice */}
+                <div className="flex items-start gap-2.5 bg-gray-800/40 rounded-xl p-3">
+                  <Shield size={15} className="text-purple-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-gray-400 leading-relaxed">
+                    This is a <span className="text-white font-medium">Direct Hire</span> request.
+                    The brand's payment is held in escrow and only released when you complete the collaboration.
+                    Accepting starts the collaboration immediately.
+                  </p>
+                </div>
+
+                {/* Error */}
+                {hireError && (
+                  <div className="flex items-start gap-2 text-xs text-red-400 bg-red-500/10 rounded-xl p-3">
+                    <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+                    <span>{hireError}</span>
+                  </div>
+                )}
+
+                {/* Actions */}
+                {!hireIsExpired ? (
+                  <div className="space-y-2 pt-1">
+                    <button
+                      onClick={acceptHireRequest}
+                      disabled={hireAction !== null}
+                      className="w-full py-3 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+                      {hireAction === 'accept'
+                        ? <><Loader2 size={16} className="animate-spin" /> Accepting…</>
+                        : 'Accept & Start Collaboration'}
+                    </button>
+                    <button
+                      onClick={declineHireRequest}
+                      disabled={hireAction !== null}
+                      className="w-full py-2.5 rounded-xl border border-gray-600 hover:border-red-500/40 text-gray-400 hover:text-red-400 text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+                      {hireAction === 'decline'
+                        ? <><Loader2 size={14} className="animate-spin" /> Declining…</>
+                        : 'Decline Request'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-center">
+                    <p className="text-sm text-red-400 font-medium">This request has expired</p>
+                    <p className="text-xs text-gray-500 mt-1">The brand's payment has been automatically refunded.</p>
+                  </div>
+                )}
+
+              </div>
+            )}
           </div>
         </div>
       )}

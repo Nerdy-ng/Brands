@@ -7,14 +7,27 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { timeAgo } from '../../lib/utils'
 
-// A notification is actionable for a creator when metadata.collabId is a
-// non-empty string. We never trust it as auth — the destination page re-fetches
-// the collab scoped to the authenticated creator.
+// IDs are routing hints only — destination pages re-fetch scoped to the authenticated user.
 function getCollabId(metadata: unknown): string | null {
   if (!metadata || typeof metadata !== 'object') return null
   const id = (metadata as Record<string, unknown>).collabId
   if (typeof id !== 'string' || !id.trim()) return null
   return id.trim()
+}
+
+function getHireRequestId(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== 'object') return null
+  const id = (metadata as Record<string, unknown>).hireRequestId
+  if (typeof id !== 'string' || !id.trim()) return null
+  return id.trim()
+}
+
+// Brand routing is gated on metadata.screen — arbitrary ID presence is not sufficient.
+function getBrandScreen(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== 'object') return null
+  const s = (metadata as Record<string, unknown>).screen
+  if (typeof s !== 'string' || !s.trim()) return null
+  return s.trim()
 }
 
 export default function NotificationsPage() {
@@ -42,12 +55,26 @@ export default function NotificationsPage() {
   }
 
   async function handleNotifClick(n: any) {
-    // Only creator role routes to the collaboration workspace.
-    // Brand notifications preserve existing static behavior.
-    if (role !== 'creator') return
+    const collabId      = getCollabId(n.metadata)
+    const hireRequestId = getHireRequestId(n.metadata)
+    const brandScreen   = getBrandScreen(n.metadata)
 
-    const collabId = getCollabId(n.metadata)
-    if (!collabId) return
+    // Resolve destination — null means non-actionable, early return below.
+    let destination: string | null = null
+
+    if (role === 'creator') {
+      if (collabId)           destination = `/creator/collabs?open=${collabId}`
+      else if (hireRequestId) destination = `/creator/collabs?hire=${hireRequestId}`
+    } else if (role === 'brand') {
+      // Brand routing is gated on metadata.screen to prevent arbitrary ID navigation.
+      if (brandScreen === 'CollabManagement' && collabId) {
+        destination = `/brand/collabs?open=${collabId}`
+      } else if (brandScreen === 'BrandPayments') {
+        destination = `/brand/payments`
+      }
+    }
+
+    if (!destination) return
 
     // Mark as read optimistically — navigation proceeds regardless of outcome.
     if (!n.read) {
@@ -61,7 +88,7 @@ export default function NotificationsPage() {
         })
     }
 
-    navigate(`/creator/collabs?open=${collabId}`)
+    navigate(destination)
   }
 
   const unreadCount = notifs.filter(n => !n.read).length
@@ -93,8 +120,17 @@ export default function NotificationsPage() {
       ) : (
         <div className="space-y-2">
           {notifs.map(n => {
-            const collabId = getCollabId(n.metadata)
-            const isActionable = role === 'creator' && !!collabId
+            const collabId      = getCollabId(n.metadata)
+            const hireRequestId = getHireRequestId(n.metadata)
+            const brandScreen   = getBrandScreen(n.metadata)
+            const isActionable  =
+              (role === 'creator' && (!!collabId || !!hireRequestId)) ||
+              (role === 'brand' && brandScreen === 'CollabManagement' && !!collabId) ||
+              (role === 'brand' && brandScreen === 'BrandPayments')
+            const ctaLabel =
+              role === 'brand'
+                ? (brandScreen === 'BrandPayments' ? 'View payments →' : 'View collaboration →')
+                : (collabId ? 'View collaboration →' : 'Review hire request →')
 
             return isActionable ? (
               <button
@@ -108,7 +144,7 @@ export default function NotificationsPage() {
                   <p className="text-sm text-white font-medium">{n.title || 'Notification'}</p>
                   {n.body && <p className="text-sm text-gray-400 mt-0.5">{n.body}</p>}
                   <p className="text-xs text-gray-600 mt-1">{timeAgo(n.created_at)}</p>
-                  <p className="text-xs text-purple-400 mt-1">View collaboration →</p>
+                  <p className="text-xs text-purple-400 mt-1">{ctaLabel}</p>
                 </div>
                 <ChevronRight size={16} className="text-gray-600 flex-shrink-0 mt-1" />
               </button>
