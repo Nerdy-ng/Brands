@@ -15,7 +15,6 @@ export default function BrandProfilePage() {
   const { user } = useAuth()
   const [form, setForm] = useState({
     company_name: '', owner_name: '', phone: '', industry: '', bio: '', website: '',
-    instagram: '', twitter: '', tiktok: '',
   })
   const [saving,  setSaving]  = useState(false)
   const [saved,   setSaved]   = useState(false)
@@ -27,7 +26,7 @@ export default function BrandProfilePage() {
     async function load() {
       if (!user) return
       const { data } = await supabase.from('profiles')
-        .select('company_name, owner_name, phone, industry, bio, website, instagram, twitter, tiktok')
+        .select('company_name, owner_name, phone, industry, bio, website')
         .eq('id', user.id).single()
       if (data) setForm(f => ({ ...f, ...data }))
       setLoading(false)
@@ -39,10 +38,12 @@ export default function BrandProfilePage() {
     e.preventDefault()
     if (!user) return
     setSaving(true)
-    await supabase.from('profiles').update(form).eq('id', user.id)
-    setSaved(true)
+    const { error } = await supabase.from('profiles').update(form).eq('id', user.id)
     setSaving(false)
-    setTimeout(() => setSaved(false), 2000)
+    if (!error) {
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    }
   }
 
   return (
@@ -101,20 +102,6 @@ export default function BrandProfilePage() {
               <label className="block text-sm text-gray-400 mb-1.5">Website</label>
               <input type="url" value={form.website} onChange={e => set('website', e.target.value)} placeholder="https://yourbrand.com" />
             </div>
-          </div>
-
-          <div className="card space-y-4">
-            <h2 className="font-semibold text-white">Social Media</h2>
-            {[
-              { key: 'instagram', label: 'Instagram', placeholder: '@yourbrand' },
-              { key: 'twitter',   label: 'Twitter / X', placeholder: '@yourbrand' },
-              { key: 'tiktok',    label: 'TikTok',    placeholder: '@yourbrand' },
-            ].map(({ key, label, placeholder }) => (
-              <div key={key}>
-                <label className="block text-sm text-gray-400 mb-1.5">{label}</label>
-                <input type="text" value={(form as any)[key]} onChange={e => set(key, e.target.value)} placeholder={placeholder} />
-              </div>
-            ))}
           </div>
 
           <button type="submit" disabled={saving} className="btn-primary flex items-center gap-2">

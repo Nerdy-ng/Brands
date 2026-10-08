@@ -24,7 +24,6 @@ interface DeliverableFile {
 
 interface CollabProfile {
   full_name: string
-  username: string | null
   avatar_url: string | null
 }
 
@@ -48,6 +47,8 @@ interface Collab {
   cancellation_expires_at: string | null
   refund_ref: string | null
   creator_id: string
+  task_approval_status: string | null
+  pending_task: { title: string; amount: number; submitted_at: string } | null
   profiles: CollabProfile | CollabProfile[] | null
 }
 
@@ -94,8 +95,8 @@ const COLLAB_SELECT = `
   brief, milestones, delivered_files, delivered_at, revision_reason,
   revisions_requested, max_revisions, cancellation_reason,
   cancellation_requested_by, cancellation_requested_at, cancellation_expires_at,
-  refund_ref, creator_id,
-  profiles:creator_id(full_name, username, avatar_url)
+  refund_ref, creator_id, task_approval_status, pending_task,
+  profiles:creator_id(full_name, avatar_url)
 `
 
 // ── Signed URL cache (module-level, survives re-renders) ──────────────────────
@@ -166,6 +167,13 @@ export default function CollabsPage() {
   const [disputeSubmitting, setDisputeSubmitting] = useState(false)
   const [disputeError,      setDisputeError]      = useState('')
   const [disputeSuccessMsg, setDisputeSuccessMsg] = useState('')
+
+  // Task submission state (brand proposes a task to creator pre-payment)
+  const [showTaskSubmit, setShowTaskSubmit] = useState(false)
+  const [taskTitle,      setTaskTitle]      = useState('')
+  const [taskAmount,     setTaskAmount]     = useState('')
+  const [taskSubmitting, setTaskSubmitting] = useState(false)
+  const [taskError,      setTaskError]      = useState('')
 
   // Realtime channel ref — prevents stale channel on re-renders
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
@@ -295,6 +303,7 @@ export default function CollabsPage() {
     setShowApproval(false)
     setShowCancel(false)
     setShowDispute(false)
+    setShowTaskSubmit(false)
     setRevisionReason('')
     setRevisionError('')
     setApprovalError('')
@@ -303,6 +312,9 @@ export default function CollabsPage() {
     setDisputeReason('')
     setDisputeError('')
     setDisputeSuccessMsg('')
+    setTaskTitle('')
+    setTaskAmount('')
+    setTaskError('')
   }
 
   function closeCollab() {
@@ -311,6 +323,7 @@ export default function CollabsPage() {
     setShowApproval(false)
     setShowCancel(false)
     setShowDispute(false)
+    setShowTaskSubmit(false)
   }
 
   // ── Revision ──────────────────────────────────────────────────────────────
@@ -472,6 +485,36 @@ export default function CollabsPage() {
     }
   }
 
+  // ── Task proposal (brand → creator, pre-payment) ──────────────────────────
+
+  async function submitTask() {
+    if (!selected || taskSubmitting) return
+    const title  = taskTitle.trim()
+    const amount = Number(taskAmount)
+    if (!title) { setTaskError('Task title is required.'); return }
+    if (!Number.isFinite(amount) || amount < 20000) {
+      setTaskError('Amount must be at least ₦20,000.'); return
+    }
+    setTaskSubmitting(true)
+    setTaskError('')
+    try {
+      const { data, error } = await supabase.functions.invoke('submit-task', {
+        body: { collab_id: selected.id, title, amount },
+      })
+      if (error || !data?.ok) {
+        throw new Error(data?.error ?? error?.message ?? 'Failed to submit task.')
+      }
+      setShowTaskSubmit(false)
+      setTaskTitle('')
+      setTaskAmount('')
+      await reloadSelected(selected.id)
+    } catch (err: any) {
+      setTaskError(err.message || 'Failed — please try again.')
+    } finally {
+      setTaskSubmitting(false)
+    }
+  }
+
   // ── Derived state ─────────────────────────────────────────────────────────
 
   const canRevise = selected
@@ -542,7 +585,6 @@ export default function CollabsPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                       <p className="font-semibold text-white truncate">{creator?.full_name || 'Creator'}</p>
-                      {creator?.username && <p className="text-gray-500 text-sm">@{creator.username}</p>}
                       <span className={`badge ${STATUS_STYLES[c.status] || 'text-gray-400 bg-gray-700'}`}>
                         {STATUS_LABELS[c.status] || c.status}
                       </span>
@@ -603,7 +645,6 @@ export default function CollabsPage() {
                     <Avatar name={creator?.full_name || 'Creator'} size="sm" avatarUrl={creator?.avatar_url} />
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-white truncate">{creator?.full_name || 'Creator'}</p>
-                      {creator?.username && <p className="text-xs text-gray-500">@{creator.username}</p>}
                     </div>
                   </>
                 )
@@ -662,6 +703,38 @@ export default function CollabsPage() {
                         <Clock size={11} /> {selected.brief.deadline}
                       </p>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* Task proposal sent — awaiting creator response */}
+              {selected.status === 'pending' && selected.payment_status === 'unpaid' && selected.task_approval_status === 'awaiting_approval' && selected.pending_task && (
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3">
+                  <p className="text-xs text-blue-400 font-medium mb-2 uppercase tracking-wide">Task Proposal Sent</p>
+                  <p className="text-sm font-semibold text-white">{selected.pending_task.title}</p>
+                  <p className="text-sm text-blue-400 font-semibold mt-0.5">{formatAmount(selected.pending_task.amount)}</p>
+                  <p className="text-xs text-gray-500 mt-1.5">Waiting for the creator to approve before payment can proceed.</p>
+                </div>
+              )}
+
+              {/* Task approved by creator — brand can now pay */}
+              {selected.status === 'pending' && selected.payment_status === 'unpaid' && selected.task_approval_status === 'approved' && (
+                <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-3 flex items-start gap-2">
+                  <CheckCircle2 size={16} className="text-green-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-green-400">Task approved by creator</p>
+                    <p className="text-sm text-gray-300 mt-0.5">You can now proceed to payment to start this collaboration.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Task declined by creator — brand can re-submit */}
+              {selected.status === 'pending' && selected.payment_status === 'unpaid' && selected.task_approval_status === 'declined' && (
+                <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 flex items-start gap-2">
+                  <AlertTriangle size={16} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-amber-400">Task proposal declined</p>
+                    <p className="text-sm text-gray-300 mt-0.5">The creator declined your proposal. You can submit a revised one.</p>
                   </div>
                 </div>
               )}
@@ -859,6 +932,15 @@ export default function CollabsPage() {
               {/* Action buttons */}
               {!['cancelled', 'completed'].includes(selected.status) && !isCancelPending && (
                 <div className="space-y-2 pt-1">
+                  {/* Submit / re-submit task proposal (pre-payment pending collabs) */}
+                  {selected.status === 'pending' && selected.payment_status === 'unpaid' && selected.task_approval_status !== 'awaiting_approval' && (
+                    <button
+                      onClick={() => { setTaskError(''); setTaskTitle(''); setTaskAmount(''); setShowTaskSubmit(true) }}
+                      className="btn-primary w-full flex items-center justify-center gap-2">
+                      <FileText size={16} />
+                      {selected.task_approval_status === 'declined' ? 'Re-submit Task Proposal' : 'Submit Task Proposal'}
+                    </button>
+                  )}
                   {canApprove && (
                     <button
                       onClick={() => { setApprovalError(''); setShowApproval(true) }}
@@ -1118,6 +1200,72 @@ export default function CollabsPage() {
                   className="btn-primary flex-1 flex items-center justify-center gap-2">
                   {disputeSubmitting && <Loader2 size={16} className="animate-spin" />}
                   {disputeSubmitting ? 'Submitting…' : 'Submit to Support'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          TASK SUBMIT MODAL
+          ═══════════════════════════════════════════════════════════════════ */}
+      {selected && showTaskSubmit && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 rounded-2xl border border-gray-800 w-full max-w-md">
+            <div className="flex items-center justify-between p-5 border-b border-gray-800">
+              <h2 className="font-bold text-white text-lg">Submit Task Proposal</h2>
+              <button onClick={() => setShowTaskSubmit(false)} disabled={taskSubmitting}
+                className="text-gray-500 hover:text-white">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-gray-400 leading-relaxed">
+                Propose a task and amount for the creator to review. Once they approve, you can proceed to payment.
+              </p>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1.5">Task Title</label>
+                <input
+                  type="text"
+                  value={taskTitle}
+                  onChange={e => setTaskTitle(e.target.value)}
+                  disabled={taskSubmitting}
+                  maxLength={200}
+                  placeholder="e.g. Instagram product review video"
+                  className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 w-full focus:outline-none focus:border-purple-600 transition-colors disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1.5">Amount (₦)</label>
+                <input
+                  type="number"
+                  value={taskAmount}
+                  onChange={e => setTaskAmount(e.target.value)}
+                  disabled={taskSubmitting}
+                  min="20000"
+                  placeholder="Minimum ₦20,000"
+                  className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 w-full focus:outline-none focus:border-purple-600 transition-colors disabled:opacity-50"
+                />
+                <p className="text-xs text-gray-600 mt-1">Platform minimum ₦20,000</p>
+              </div>
+              {taskError && (
+                <div className="flex items-start gap-2 text-xs text-red-400 bg-red-500/10 rounded-xl p-3">
+                  <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+                  <span>{taskError}</span>
+                </div>
+              )}
+              <div className="flex gap-3">
+                <button onClick={() => setShowTaskSubmit(false)} disabled={taskSubmitting}
+                  className="btn-secondary flex-1">
+                  Cancel
+                </button>
+                <button
+                  onClick={submitTask}
+                  disabled={taskSubmitting || !taskTitle.trim() || !taskAmount}
+                  className="btn-primary flex-1 flex items-center justify-center gap-2">
+                  {taskSubmitting && <Loader2 size={16} className="animate-spin" />}
+                  {taskSubmitting ? 'Sending…' : 'Send Proposal'}
                 </button>
               </div>
             </div>

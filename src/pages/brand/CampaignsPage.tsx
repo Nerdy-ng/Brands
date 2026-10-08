@@ -101,7 +101,7 @@ export default function CampaignsPage() {
       const creatorIds = [...new Set(apps.map((a: any) => a.creator_id))]
       const { data: profiles } = await supabase
         .from('profiles')
-        .select('id, full_name, username, avatar_url, niche, tier')
+        .select('id, full_name, niches, avatar_url, tier')
         .in('id', creatorIds)
       const profileMap = Object.fromEntries((profiles || []).map((p: any) => [p.id, p]))
       setProposals(apps.map((a: any) => ({ ...a, profile: profileMap[a.creator_id] || null })))
@@ -156,7 +156,7 @@ export default function CampaignsPage() {
     }
   }
 
-  // Step 2: call collab-pay Edge Function. On success → mark application accepted → navigate.
+  // Step 2: call collab-pay Edge Function. Application acceptance is handled server-side.
   async function handlePayment() {
     if (!paymentCollab || !user || paying) return
     setPaying(true)
@@ -168,11 +168,6 @@ export default function CampaignsPage() {
       if (error || !data?.ok) {
         throw new Error(data?.error ?? error?.message ?? 'Payment failed')
       }
-      // Mark application accepted only after payment confirms
-      await supabase
-        .from('job_applications')
-        .update({ status: 'accepted' })
-        .eq('id', paymentCollab.app.id)
       setPaymentCollab(null)
       navigate('/brand/collabs')
     } catch (err: any) {
@@ -279,8 +274,8 @@ export default function CampaignsPage() {
                                 {app.profile?.full_name || 'Creator'}
                               </p>
                               <div className="flex items-center gap-2 mt-0.5">
-                                {app.profile?.niche && (
-                                  <span className="text-xs text-gray-500">{app.profile.niche}</span>
+                                {app.profile?.niches?.[0] && (
+                                  <span className="text-xs text-gray-500">{app.profile.niches[0]}</span>
                                 )}
                                 {app.profile?.tier && (
                                   <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${TIER_COLORS[app.profile.tier] || 'text-gray-400 bg-gray-700'}`}>

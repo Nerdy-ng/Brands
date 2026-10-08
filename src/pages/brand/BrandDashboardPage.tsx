@@ -28,7 +28,7 @@ export default function BrandDashboardPage() {
         supabase.from('collabs').select('id').eq('brand_id', user.id).eq('status', 'pending'),
         supabase.from('collabs').select('id').eq('brand_id', user.id).eq('status', 'completed'),
         supabase.from('public_jobs').select('id').eq('brand_id', user.id),
-        supabase.from('profiles').select('id, full_name, username, avatar_url, niche, tier').in('role', ['Talent', 'talent', 'creator', 'Creator']).limit(6),
+        supabase.from('profiles').select('id, full_name, avatar_url, niches, tier').in('role', ['Talent', 'talent', 'creator', 'Creator']).limit(6),
       ])
       setProfile(profileRes.data)
       setActiveCollabs(collabsRes.data || [])
@@ -153,7 +153,7 @@ export default function BrandDashboardPage() {
                   <Avatar name={c.full_name || 'Creator'} size="sm" avatarUrl={c.avatar_url} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-white truncate">{c.full_name}</p>
-                    <p className="text-xs text-gray-500 truncate">{c.niche || 'Creator'}</p>
+                    <p className="text-xs text-gray-500 truncate">{c.niches?.[0] || 'Creator'}</p>
                   </div>
                   {c.tier && (
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${tierColors[c.tier] || 'text-gray-400 bg-gray-800'}`}>

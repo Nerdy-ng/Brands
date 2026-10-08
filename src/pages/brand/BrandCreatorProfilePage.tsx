@@ -28,17 +28,19 @@ const CREATOR_ROLES = new Set(['talent', 'Talent', 'creator', 'Creator'])
 interface CreatorProfile {
   id: string
   full_name: string | null
-  username: string | null
   avatar_url: string | null
-  niche: string | null
+  niches: string[] | null
   tier: string | null
   bio: string | null
-  rate_from: number | null
-  instagram: string | null
-  twitter: string | null
-  tiktok: string | null
-  youtube: string | null
-  portfolio_url: string | null
+  min_price: number | null
+  socials: {
+    instagram?: string
+    tiktok?: string
+    twitter?: string
+    youtube?: string
+    role?: string
+  } | null
+  website: string | null
   role: string | null
 }
 
@@ -221,7 +223,7 @@ export default function BrandCreatorProfilePage() {
 
       const { data, error: profileErr } = await supabase
         .from('profiles')
-        .select('id, full_name, username, avatar_url, niche, tier, bio, rate_from, instagram, twitter, tiktok, youtube, portfolio_url, role')
+        .select('id, full_name, avatar_url, niches, tier, bio, min_price, socials, website, role')
         .eq('id', creatorId)
         .maybeSingle()
 
@@ -306,8 +308,22 @@ export default function BrandCreatorProfilePage() {
     (walletBalance === null || walletBalance >= total)
 
   const tier        = profile?.tier ? (TIER_STYLES[profile.tier] ?? null) : null
-  const hasSocial   = profile && (profile.instagram || profile.twitter || profile.tiktok || profile.youtube || profile.portfolio_url)
-  const displayName = profile ? (profile.full_name || profile.username || 'Creator') : ''
+  const hasSocial   = profile?.socials && (
+    profile.socials.instagram?.trim() ||
+    profile.socials.twitter?.trim() ||
+    profile.socials.tiktok?.trim() ||
+    profile.socials.youtube?.trim() ||
+    profile.website?.trim()
+  )
+  const displayName = profile ? (profile.full_name || 'Creator') : ''
+
+  const startingPrice: number | null = (() => {
+    const prices = (rateCard?.durations ?? [])
+      .map(d => d.price)
+      .filter(p => p > 0)
+    if (prices.length > 0) return Math.min(...prices)
+    return profile?.min_price ?? null
+  })()
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -469,15 +485,12 @@ export default function BrandCreatorProfilePage() {
               <h1 className="text-xl font-bold text-white">{displayName}</h1>
               {tier && <span className={`badge ${tier.class}`}>{tier.label}</span>}
             </div>
-            {profile!.username && (
-              <p className="text-gray-500 text-sm mt-0.5">@{profile!.username}</p>
+            {profile!.niches?.[0] && (
+              <p className="text-purple-400 text-sm font-medium mt-1">{profile!.niches[0]}</p>
             )}
-            {profile!.niche && (
-              <p className="text-purple-400 text-sm font-medium mt-1">{profile!.niche}</p>
-            )}
-            {profile!.rate_from != null && profile!.rate_from > 0 && (
+            {!rcLoading && startingPrice !== null && startingPrice > 0 && (
               <p className="text-gray-400 text-sm mt-2">
-                Starting from <span className="text-white font-semibold">{formatAmount(profile!.rate_from)}</span>
+                Starting from <span className="text-white font-semibold">{formatAmount(startingPrice)}</span>
               </p>
             )}
           </div>
@@ -496,36 +509,36 @@ export default function BrandCreatorProfilePage() {
           <div className="card">
             <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Links</h2>
             <div className="flex flex-wrap gap-2">
-              {profile!.instagram && (
-                <a href={`https://instagram.com/${profile!.instagram.replace('@', '')}`}
+              {profile!.socials?.instagram?.trim() && (
+                <a href={`https://instagram.com/${profile!.socials.instagram!.replace('@', '')}`}
                   target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-1.5 text-sm text-gray-300 hover:text-pink-400 transition-colors bg-gray-800 rounded-lg px-3 py-1.5">
-                  <Instagram size={14} /> {profile!.instagram}
+                  <Instagram size={14} /> {profile!.socials.instagram}
                 </a>
               )}
-              {profile!.twitter && (
-                <a href={`https://x.com/${profile!.twitter.replace('@', '')}`}
+              {profile!.socials?.twitter?.trim() && (
+                <a href={`https://x.com/${profile!.socials.twitter!.replace('@', '')}`}
                   target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-1.5 text-sm text-gray-300 hover:text-sky-400 transition-colors bg-gray-800 rounded-lg px-3 py-1.5">
-                  <Twitter size={14} /> {profile!.twitter}
+                  <Twitter size={14} /> {profile!.socials.twitter}
                 </a>
               )}
-              {profile!.tiktok && (
-                <a href={`https://tiktok.com/@${profile!.tiktok.replace('@', '')}`}
+              {profile!.socials?.tiktok?.trim() && (
+                <a href={`https://tiktok.com/@${profile!.socials.tiktok!.replace('@', '')}`}
                   target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-1.5 text-sm text-gray-300 hover:text-white transition-colors bg-gray-800 rounded-lg px-3 py-1.5">
-                  <span className="text-xs font-bold">TT</span> {profile!.tiktok}
+                  <span className="text-xs font-bold">TT</span> {profile!.socials.tiktok}
                 </a>
               )}
-              {profile!.youtube && (
-                <a href={profile!.youtube.startsWith('http') ? profile!.youtube : `https://youtube.com/${profile!.youtube}`}
+              {profile!.socials?.youtube?.trim() && (
+                <a href={profile!.socials.youtube!.startsWith('http') ? profile!.socials.youtube! : `https://youtube.com/${profile!.socials.youtube}`}
                   target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-1.5 text-sm text-gray-300 hover:text-red-400 transition-colors bg-gray-800 rounded-lg px-3 py-1.5">
                   <Youtube size={14} /> YouTube
                 </a>
               )}
-              {profile!.portfolio_url && (
-                <a href={profile!.portfolio_url}
+              {profile!.website?.trim() && (
+                <a href={profile!.website!}
                   target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-1.5 text-sm text-gray-300 hover:text-purple-400 transition-colors bg-gray-800 rounded-lg px-3 py-1.5">
                   <Globe size={14} /> Portfolio
@@ -818,7 +831,7 @@ export default function BrandCreatorProfilePage() {
                     <Avatar name={displayName} size="md" avatarUrl={profile!.avatar_url} />
                     <div>
                       <p className="font-semibold text-white">{displayName}</p>
-                      {profile!.niche && <p className="text-xs text-gray-500">{profile!.niche}</p>}
+                      {profile!.niches?.[0] && <p className="text-xs text-gray-500">{profile!.niches[0]}</p>}
                     </div>
                   </div>
 

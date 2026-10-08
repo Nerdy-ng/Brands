@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, SlidersHorizontal, Star } from 'lucide-react'
 import BrandLayout from '../../components/BrandLayout'
@@ -16,28 +16,81 @@ const TIER_STYLES: Record<string, { label: string; class: string }> = {
 
 export default function DiscoverPage() {
   const navigate = useNavigate()
-  const [creators, setCreators]   = useState<any[]>([])
-  const [query,    setQuery]      = useState('')
-  const [niche,    setNiche]      = useState('All')
-  const [loading,  setLoading]    = useState(true)
+  const [allCreators, setAllCreators] = useState<any[]>([])
+  const [query,       setQuery]       = useState('')
+  const [niche,       setNiche]       = useState('All')
+  const [loading,     setLoading]     = useState(true)
+  const [loadError,   setLoadError]   = useState('')
 
   useEffect(() => {
     async function load() {
       setLoading(true)
-      let q = supabase.from('profiles')
-        .select('id, full_name, username, avatar_url, niche, tier, bio, rate_from')
+      setLoadError('')
+
+      let profilesQ = supabase
+        .from('profiles')
+        .select('id, full_name, bio, niches, avg_rating, available_for_hire, location, min_price, skills, tier, avatar_url')
         .in('role', ['Talent', 'talent', 'creator', 'Creator'])
+        .not('role', 'in', '("brand","Brand")')
         .order('created_at', { ascending: false })
         .limit(200)
-      if (niche !== 'All') q = q.ilike('niche', `%${niche}%`)
-      if (query) q = q.or(`full_name.ilike.%${query}%,username.ilike.%${query}%,bio.ilike.%${query}%`)
-      const { data } = await q
-      setCreators(data || [])
-      setLoading(false)
+
+      if (niche !== 'All') profilesQ = profilesQ.contains('niches', [niche])
+
+      try {
+        const [{ data: profiles, error: profilesErr }, { data: rateCards, error: rateCardsErr }] = await Promise.all([
+          profilesQ,
+          supabase.from('rate_cards').select('creator_id, durations').eq('is_public', true),
+        ])
+
+        if (profilesErr) {
+          console.error('[DiscoverPage] profiles query failed:', profilesErr.code, profilesErr.message)
+          setLoadError('Failed to load creators. Please try again.')
+          setLoading(false)
+          return
+        }
+
+        if (rateCardsErr) {
+          console.error('[DiscoverPage] rate_cards query failed:', rateCardsErr.code, rateCardsErr.message)
+          setLoadError('Failed to load creator pricing. Please try again.')
+          setLoading(false)
+          return
+        }
+
+        const rateCardMap = new Map<string, any[]>(
+          (rateCards ?? []).map((rc: any) => [rc.creator_id, rc.durations])
+        )
+
+        const normalized = (profiles ?? []).map((p: any) => {
+          const durations: any[] = rateCardMap.get(p.id) ?? []
+          const prices = durations
+            .map((d: any) => Number(d.price))
+            .filter((x: number) => Number.isFinite(x) && x > 0)
+          const startingPrice = prices.length > 0 ? Math.min(...prices) : (p.min_price ?? 0)
+          return { ...p, startingPrice }
+        })
+
+        setAllCreators(normalized)
+        setLoading(false)
+      } catch (err: any) {
+        console.error('[DiscoverPage] unexpected error:', err)
+        setLoadError('Something went wrong. Please try again.')
+        setLoading(false)
+      }
     }
-    const t = setTimeout(load, 300)
-    return () => clearTimeout(t)
-  }, [query, niche])
+
+    load()
+  }, [niche])
+
+  const creators = useMemo(() => {
+    if (!query.trim()) return allCreators
+    const q = query.toLowerCase()
+    return allCreators.filter(c =>
+      (c.full_name ?? '').toLowerCase().includes(q) ||
+      (c.bio       ?? '').toLowerCase().includes(q) ||
+      (Array.isArray(c.niches) ? c.niches : []).some((n: string) => n.toLowerCase().includes(q))
+    )
+  }, [allCreators, query])
 
   return (
     <BrandLayout>
@@ -78,6 +131,10 @@ export default function DiscoverPage() {
             </div>
           ))}
         </div>
+      ) : loadError ? (
+        <div className="card text-center py-16">
+          <p className="text-red-400">{loadError}</p>
+        </div>
       ) : creators.length === 0 ? (
         <div className="card text-center py-16">
           <Search size={40} className="text-gray-700 mx-auto mb-3" />
@@ -88,6 +145,7 @@ export default function DiscoverPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {creators.map(c => {
             const tier = TIER_STYLES[c.tier] || TIER_STYLES['fast-rising']
+            const primaryNiche = Array.isArray(c.niches) ? c.niches[0] : null
             return (
               <div
                 key={c.id}
@@ -98,19 +156,18 @@ export default function DiscoverPage() {
                   <Avatar name={c.full_name || 'Creator'} size="lg" avatarUrl={c.avatar_url} />
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-white truncate">{c.full_name}</p>
-                    {c.username && <p className="text-gray-500 text-sm truncate">@{c.username}</p>}
                     {c.tier && (
                       <span className={`badge mt-1 ${tier.class}`}>{tier.label}</span>
                     )}
                   </div>
                 </div>
-                {c.niche && <p className="text-xs text-purple-400 font-medium mb-2">{c.niche}</p>}
+                {primaryNiche && <p className="text-xs text-purple-400 font-medium mb-2">{primaryNiche}</p>}
                 {c.bio && (
                   <p className="text-gray-500 text-sm line-clamp-2 mb-3">{c.bio}</p>
                 )}
-                {c.rate_from > 0 && (
+                {c.startingPrice > 0 && (
                   <p className="text-sm text-gray-400">
-                    From <span className="text-white font-semibold">{formatAmount(c.rate_from)}</span>
+                    From <span className="text-white font-semibold">{formatAmount(c.startingPrice)}</span>
                   </p>
                 )}
               </div>

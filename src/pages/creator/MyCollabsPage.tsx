@@ -68,6 +68,8 @@ interface Collab {
   paid_at: string | null
   platforms: string[] | null
   addons: any[] | null
+  task_approval_status: string | null
+  pending_task: { title: string; amount: number; submitted_at: string } | null
   profiles: BrandProfile | BrandProfile[] | null
 }
 
@@ -144,6 +146,7 @@ const COLLAB_SELECT = `
   previous_status, refund_ref, refunded_at,
   created_at, completed_at, released_at, paid_at,
   platforms, addons,
+  task_approval_status, pending_task,
   profiles:brand_id(company_name, avatar_url)
 `
 
@@ -298,6 +301,10 @@ export default function MyCollabsPage() {
   const [disputeSuccessMsg, setDisputeSuccessMsg] = useState('')
 
   const [openError, setOpenError] = useState('')
+
+  // Task approval state (creator responds to brand's task proposal)
+  const [taskRespondLoading, setTaskRespondLoading] = useState<'approve' | 'decline' | null>(null)
+  const [taskRespondError,   setTaskRespondError]   = useState('')
 
   // Hire request state
   const [pendingHireRequests, setPendingHireRequests] = useState<HireRequest[]>([])
@@ -574,6 +581,7 @@ export default function MyCollabsPage() {
     setDisputeReason('')
     setDisputeError('')
     setDisputeSuccessMsg('')
+    setTaskRespondError('')
   }
 
   function closeCollab() {
@@ -588,6 +596,7 @@ export default function MyCollabsPage() {
     setDisputeReason('')
     setDisputeError('')
     setDisputeSuccessMsg('')
+    setTaskRespondError('')
   }
 
   // ── Open / close hire request ─────────────────────────────────────────────────
@@ -869,6 +878,27 @@ export default function MyCollabsPage() {
       setDisputeError(err instanceof Error ? err.message : 'Please try again or contact support.')
     } finally {
       setDisputeSubmitting(false)
+    }
+  }
+
+  // ── Task respond (creator approves/declines brand's task proposal) ──────────
+
+  async function respondTask(action: 'approve' | 'decline') {
+    if (!selected || taskRespondLoading) return
+    setTaskRespondLoading(action)
+    setTaskRespondError('')
+    try {
+      const { data, error } = await supabase.functions.invoke('respond-task', {
+        body: { collab_id: selected.id, action },
+      })
+      if (error || !data?.ok) {
+        throw new Error(data?.error ?? error?.message ?? 'Failed to respond.')
+      }
+      await reloadSelected(selected.id)
+    } catch (err: any) {
+      setTaskRespondError(err.message || 'Failed — please try again.')
+    } finally {
+      setTaskRespondLoading(null)
     }
   }
 
@@ -1448,8 +1478,47 @@ export default function MyCollabsPage() {
                 </div>
               )}
 
-              {/* Pending / awaiting payment */}
-              {selected.status === 'pending' && selected.payment_status === 'unpaid' && (
+              {/* Pending task awaiting creator approval */}
+              {selected.status === 'pending' && selected.payment_status === 'unpaid' && selected.task_approval_status === 'awaiting_approval' && selected.pending_task && (
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 space-y-3">
+                  <div className="flex items-start gap-2">
+                    <Clock size={16} className="text-blue-400 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-blue-400">Task Proposal from Brand</p>
+                      <p className="text-sm font-semibold text-white mt-1">{selected.pending_task.title}</p>
+                      <p className="text-sm text-green-400 font-semibold mt-0.5">{formatAmount(selected.pending_task.amount)}</p>
+                      <p className="text-xs text-gray-500 mt-1.5">
+                        Approving starts the collaboration once the brand funds payment.
+                      </p>
+                    </div>
+                  </div>
+                  {taskRespondError && (
+                    <div className="flex items-start gap-2 text-xs text-red-400 bg-red-500/10 rounded-xl p-2.5">
+                      <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
+                      <span>{taskRespondError}</span>
+                    </div>
+                  )}
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={() => respondTask('decline')}
+                      disabled={taskRespondLoading !== null}
+                      className="flex-1 py-2.5 rounded-xl border border-gray-600 text-gray-300 hover:border-gray-500 hover:text-white text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+                      {taskRespondLoading === 'decline' ? <Loader2 size={14} className="animate-spin" /> : null}
+                      Decline
+                    </button>
+                    <button
+                      onClick={() => respondTask('approve')}
+                      disabled={taskRespondLoading !== null}
+                      className="flex-1 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+                      {taskRespondLoading === 'approve' ? <Loader2 size={14} className="animate-spin" /> : null}
+                      Approve Task
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Pending / awaiting payment (no active task proposal) */}
+              {selected.status === 'pending' && selected.payment_status === 'unpaid' && selected.task_approval_status !== 'awaiting_approval' && (
                 <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-center gap-2">
                   <Clock size={16} className="text-blue-400 flex-shrink-0" />
                   <p className="text-sm text-blue-400">

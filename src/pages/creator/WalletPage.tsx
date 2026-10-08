@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Eye, EyeOff, ArrowDownLeft, Loader2, X } from 'lucide-react'
+import { Eye, EyeOff, ArrowDownLeft, Loader2, X, Lock, ShieldCheck, AlertTriangle } from 'lucide-react'
 import CreatorLayout from '../../components/CreatorLayout'
 import { supabase } from '../../lib/supabase'
 import { rubies } from '../../lib/rubies'
@@ -15,9 +15,17 @@ const COMMON_BANKS = [
 export default function WalletPage() {
   const { user } = useAuth()
   const [balance,     setBalance]     = useState(0)
+  const [kycVerified, setKycVerified] = useState(false)
   const [showBalance, setShowBalance] = useState(true)
   const [transactions, setTransactions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+
+  // KYC form
+  const [showKyc,    setShowKyc]    = useState(false)
+  const [kycMethod,  setKycMethod]  = useState<'bvn' | 'nin'>('bvn')
+  const [kycForm,    setKycForm]    = useState({ idNumber: '', firstName: '', lastName: '', dob: '' })
+  const [kycError,   setKycError]   = useState('')
+  const [kycLoading, setKycLoading] = useState(false)
 
   // Payout form
   const [showPayout, setShowPayout] = useState(false)
@@ -27,6 +35,7 @@ export default function WalletPage() {
   const [payoutLoading, setPayoutLoading] = useState(false)
   const [payoutError, setPayoutError] = useState('')
 
+  const setKyc    = (k: string, v: string) => setKycForm(f => ({ ...f, [k]: v }))
   const setPayout = (k: string, v: string) => setPayoutForm(f => ({ ...f, [k]: v }))
 
   async function load() {
@@ -34,10 +43,11 @@ export default function WalletPage() {
     setLoading(true)
     try {
       const [profileRes, txRes] = await Promise.all([
-        supabase.from('profiles').select('wallet_balance').eq('id', user.id).single(),
+        supabase.from('profiles').select('wallet_balance, identity_verified').eq('id', user.id).single(),
         supabase.from('transactions').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20),
       ])
       setBalance(profileRes.data?.wallet_balance || 0)
+      setKycVerified(profileRes.data?.identity_verified === true)
       setTransactions(txRes.data || [])
     } finally {
       setLoading(false)
@@ -82,6 +92,26 @@ export default function WalletPage() {
     }
   }
 
+  async function handleKyc(e: React.FormEvent) {
+    e.preventDefault()
+    setKycError('')
+    setKycLoading(true)
+    try {
+      await rubies.kyc({
+        [kycMethod]: kycForm.idNumber,
+        firstName: kycForm.firstName,
+        lastName:  kycForm.lastName,
+        dob:       kycForm.dob,
+      } as any)
+      setKycVerified(true)
+      setShowKyc(false)
+    } catch (err: any) {
+      setKycError(err.message || 'Verification failed')
+    } finally {
+      setKycLoading(false)
+    }
+  }
+
   return (
     <CreatorLayout>
       <div className="mb-6">
@@ -97,20 +127,47 @@ export default function WalletPage() {
         <div className="relative">
           <div className="flex items-center justify-between mb-4">
             <p className="text-green-200 text-sm font-medium">Earnings Balance</p>
-            <button onClick={() => setShowBalance(!showBalance)} className="text-white/70 hover:text-white">
-              {showBalance ? <EyeOff size={18} /> : <Eye size={18} />}
-            </button>
+            <div className="flex items-center gap-2">
+              {kycVerified ? (
+                <span className="flex items-center gap-1.5 text-xs bg-white/20 px-3 py-1 rounded-full text-white">
+                  <ShieldCheck size={12} /> Verified
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 text-xs bg-white/20 px-3 py-1 rounded-full text-white">
+                  <Lock size={12} /> Unverified
+                </span>
+              )}
+              <button onClick={() => setShowBalance(!showBalance)} className="text-white/70 hover:text-white">
+                {showBalance ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </div>
           <p className="text-4xl font-bold text-white mb-6">
             {showBalance ? formatAmount(balance) : '● ● ● ● ●'}
           </p>
-          <button onClick={() => setShowPayout(true)}
+          <button onClick={() => kycVerified ? setShowPayout(true) : setShowKyc(true)}
             className="flex items-center gap-2 bg-white text-green-700 font-semibold px-5 py-2.5 rounded-xl hover:bg-green-50 transition-colors text-sm">
-            <ArrowDownLeft size={16} />
-            Withdraw
+            {kycVerified
+              ? <><ArrowDownLeft size={16} /> Withdraw</>
+              : <><Lock size={16} /> Verify to Withdraw</>}
           </button>
         </div>
       </div>
+
+      {/* KYC Banner */}
+      {!kycVerified && (
+        <div className="card border-amber-500/30 bg-amber-500/5 mb-6 flex items-center gap-4">
+          <AlertTriangle size={20} className="text-amber-400 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-amber-300 font-medium text-sm">Identity verification required</p>
+            <p className="text-amber-400/70 text-xs mt-0.5">Verify your identity to withdraw your earnings</p>
+          </div>
+          <button onClick={() => setShowKyc(true)}
+            className="bg-amber-500 hover:bg-amber-400 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors flex-shrink-0">
+            Verify Now
+          </button>
+        </div>
+      )}
 
       {/* Transaction history */}
       <div className="card">
@@ -187,6 +244,60 @@ export default function WalletPage() {
                 <button type="submit" disabled={payoutLoading || !accountName} className="btn-primary flex-1 flex items-center justify-center gap-2">
                   {payoutLoading && <Loader2 size={16} className="animate-spin" />}
                   {payoutLoading ? 'Processing…' : 'Withdraw'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* KYC Modal */}
+      {showKyc && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 rounded-2xl border border-gray-800 w-full max-w-md">
+            <div className="flex items-center justify-between p-5 border-b border-gray-800">
+              <div>
+                <h2 className="font-bold text-white">Verify Your Identity</h2>
+                <p className="text-gray-500 text-sm mt-0.5">Required to withdraw your earnings</p>
+              </div>
+              <button onClick={() => setShowKyc(false)} className="text-gray-500 hover:text-white"><X size={20} /></button>
+            </div>
+            <form onSubmit={handleKyc} className="p-5 space-y-4">
+              <div className="flex bg-gray-800 rounded-xl p-1">
+                {(['bvn', 'nin'] as const).map(m => (
+                  <button key={m} type="button" onClick={() => setKycMethod(m)}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${kycMethod === m ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                    {m.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1.5">{kycMethod.toUpperCase()} Number</label>
+                <input type="text" required maxLength={11} value={kycForm.idNumber}
+                  onChange={e => setKyc('idNumber', e.target.value.replace(/\D/g, ''))}
+                  placeholder={kycMethod === 'bvn' ? '11-digit BVN' : '11-digit NIN'} />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1.5">First Name</label>
+                  <input type="text" required value={kycForm.firstName} onChange={e => setKyc('firstName', e.target.value)} placeholder="As on ID" />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1.5">Last Name</label>
+                  <input type="text" required value={kycForm.lastName} onChange={e => setKyc('lastName', e.target.value)} placeholder="As on ID" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1.5">Date of Birth</label>
+                <input type="date" required value={kycForm.dob} onChange={e => setKyc('dob', e.target.value)} />
+              </div>
+              {kycError && (
+                <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">{kycError}</p>
+              )}
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setShowKyc(false)} className="btn-secondary flex-1">Cancel</button>
+                <button type="submit" disabled={kycLoading} className="btn-primary flex-1 flex items-center justify-center gap-2">
+                  {kycLoading && <Loader2 size={16} className="animate-spin" />}
+                  {kycLoading ? 'Verifying…' : 'Verify Identity'}
                 </button>
               </div>
             </form>

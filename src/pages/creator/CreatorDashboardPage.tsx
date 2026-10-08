@@ -29,7 +29,7 @@ export default function CreatorDashboardPage() {
     setLoading(true)
     try {
       const [profileRes, activeRes, completedRes, pendingRes, jobsRes] = await Promise.all([
-        supabase.from('profiles').select('full_name, username, avatar_url, tier, wallet_balance, bio').eq('id', user.id).single(),
+        supabase.from('profiles').select('full_name, avatar_url, tier, wallet_balance, bio').eq('id', user.id).single(),
         supabase.from('collabs').select('id, content_type, total_amount, created_at, status, profiles:brand_id(company_name, avatar_url)').eq('creator_id', user.id).in('status', ['in_progress', 'revision_requested', 'delivered']).order('created_at', { ascending: false }).limit(5),
         supabase.from('collabs').select('id').eq('creator_id', user.id).eq('status', 'completed'),
         supabase.from('collabs').select('id').eq('creator_id', user.id).eq('status', 'pending'),
