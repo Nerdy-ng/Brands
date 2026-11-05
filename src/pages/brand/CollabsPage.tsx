@@ -168,6 +168,13 @@ export default function CollabsPage() {
   const [disputeError,      setDisputeError]      = useState('')
   const [disputeSuccessMsg, setDisputeSuccessMsg] = useState('')
 
+  // Dispute statement v2 — shown when collab is disputed
+  const [disputeRecord,       setDisputeRecord]       = useState<{ id: string; brand_statement: string | null; status: string } | null>(null)
+  const [statementDraft,      setStatementDraft]      = useState('')
+  const [statementSubmitting, setStatementSubmitting] = useState(false)
+  const [statementError,      setStatementError]      = useState('')
+  const [statementSuccess,    setStatementSuccess]    = useState(false)
+
   // Task submission state (brand proposes a task to creator pre-payment)
   const [showTaskSubmit, setShowTaskSubmit] = useState(false)
   const [taskTitle,      setTaskTitle]      = useState('')
@@ -482,6 +489,41 @@ export default function CollabsPage() {
       setDisputeError(err.message || 'Please try again or contact support.')
     } finally {
       setDisputeSubmitting(false)
+    }
+  }
+
+  // ── Dispute statement v2 ─────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!selected || selected.status !== 'disputed') {
+      setDisputeRecord(null); setStatementDraft(''); setStatementError(''); setStatementSuccess(false)
+      return
+    }
+    supabase.from('disputes').select('id, brand_statement, status')
+      .eq('collab_id', selected.id).order('created_at', { ascending: false }).limit(1).maybeSingle()
+      .then(({ data }) => { if (data) { setDisputeRecord(data as any); setStatementDraft(data.brand_statement ?? '') } })
+  }, [selected?.id, selected?.status])
+
+  async function submitStatement() {
+    if (!disputeRecord || statementSubmitting) return
+    const text = statementDraft.trim()
+    if (!text) { setStatementError('Please enter your statement.'); return }
+    if (text.length > 2000) { setStatementError('Statement must be 2,000 characters or fewer.'); return }
+    setStatementSubmitting(true); setStatementError('')
+    try {
+      const { data, error } = await supabase.functions.invoke('submit-dispute-statement', {
+        body: { dispute_id: disputeRecord.id, statement: text },
+      })
+      if (error || !data?.ok) {
+        const code = data?.error ?? ''
+        throw new Error(code === 'dispute_already_resolved' ? 'This dispute is already resolved.' : 'Could not save your statement. Please try again.')
+      }
+      setStatementSuccess(true)
+      setDisputeRecord(prev => prev ? { ...prev, brand_statement: text } : prev)
+    } catch (err: any) {
+      setStatementError(err.message || 'Please try again or contact support.')
+    } finally {
+      setStatementSubmitting(false)
     }
   }
 
@@ -921,6 +963,46 @@ export default function CollabsPage() {
                 </div>
               )}
 
+              {/* Dispute statement */}
+              {selected.status === 'disputed' && disputeRecord && (
+                <div className="border border-gray-700/50 rounded-xl p-4 space-y-3">
+                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Your Statement</p>
+                  {['resolved', 'closed'].includes(disputeRecord.status) ? (
+                    <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">
+                      {disputeRecord.brand_statement ?? <span className="text-gray-600 italic">No statement on record.</span>}
+                    </p>
+                  ) : (
+                    <>
+                      <textarea
+                        value={statementDraft}
+                        onChange={e => { setStatementDraft(e.target.value); setStatementError(''); setStatementSuccess(false) }}
+                        placeholder="Provide your account of events clearly and factually. Our team will review statements from both parties."
+                        maxLength={2000}
+                        rows={4}
+                        className="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-gray-600 resize-none focus:outline-none focus:border-purple-500/50"
+                      />
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-gray-600">{statementDraft.length}/2000</span>
+                        {statementSuccess && <span className="text-xs text-green-400">Statement saved.</span>}
+                      </div>
+                      {statementError && (
+                        <div className="flex items-start gap-2 text-xs text-red-400 bg-red-500/10 rounded-xl p-2.5">
+                          <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
+                          <span>{statementError}</span>
+                        </div>
+                      )}
+                      <button
+                        onClick={submitStatement}
+                        disabled={statementSubmitting || !statementDraft.trim()}
+                        className="w-full py-2.5 rounded-xl bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+                        {statementSubmitting && <Loader2 size={14} className="animate-spin" />}
+                        {statementSubmitting ? 'Saving…' : disputeRecord.brand_statement ? 'Update Statement' : 'Submit Statement'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+
               {/* Dispute raised confirmation */}
               {disputeSuccessMsg && (
                 <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-3 flex items-start gap-2">
@@ -1112,7 +1194,7 @@ export default function CollabsPage() {
                 <>
                   <p className="text-sm text-gray-400">
                     A cancellation request will be sent to the creator. They have 48 hours to respond.
-                    If accepted, your escrow payment will be refunded.
+                    If accepted, your escrow payment will be credited to your Brandior wallet.
                   </p>
                   <div>
                     <label className="block text-sm text-gray-400 mb-1.5">Reason (required)</label>

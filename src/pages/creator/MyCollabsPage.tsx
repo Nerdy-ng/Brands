@@ -300,6 +300,13 @@ export default function MyCollabsPage() {
   const [disputeError,      setDisputeError]      = useState('')
   const [disputeSuccessMsg, setDisputeSuccessMsg] = useState('')
 
+  // Dispute statement v2 — shown when collab is disputed
+  const [disputeRecordC,       setDisputeRecordC]       = useState<{ id: string; creator_statement: string | null; status: string } | null>(null)
+  const [statementDraftC,      setStatementDraftC]      = useState('')
+  const [statementSubmittingC, setStatementSubmittingC] = useState(false)
+  const [statementErrorC,      setStatementErrorC]      = useState('')
+  const [statementSuccessC,    setStatementSuccessC]    = useState(false)
+
   const [openError, setOpenError] = useState('')
 
   // Task approval state (creator responds to brand's task proposal)
@@ -878,6 +885,41 @@ export default function MyCollabsPage() {
       setDisputeError(err instanceof Error ? err.message : 'Please try again or contact support.')
     } finally {
       setDisputeSubmitting(false)
+    }
+  }
+
+  // ── Dispute statement v2 ─────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!selected || selected.status !== 'disputed') {
+      setDisputeRecordC(null); setStatementDraftC(''); setStatementErrorC(''); setStatementSuccessC(false)
+      return
+    }
+    supabase.from('disputes').select('id, creator_statement, status')
+      .eq('collab_id', selected.id).order('created_at', { ascending: false }).limit(1).maybeSingle()
+      .then(({ data }) => { if (data) { setDisputeRecordC(data as any); setStatementDraftC(data.creator_statement ?? '') } })
+  }, [selected?.id, selected?.status])
+
+  async function submitCreatorStatement() {
+    if (!disputeRecordC || statementSubmittingC) return
+    const text = statementDraftC.trim()
+    if (!text) { setStatementErrorC('Please enter your statement.'); return }
+    if (text.length > 2000) { setStatementErrorC('Statement must be 2,000 characters or fewer.'); return }
+    setStatementSubmittingC(true); setStatementErrorC('')
+    try {
+      const { data, error } = await supabase.functions.invoke('submit-dispute-statement', {
+        body: { dispute_id: disputeRecordC.id, statement: text },
+      })
+      if (error || !data?.ok) {
+        const code = data?.error ?? ''
+        throw new Error(code === 'dispute_already_resolved' ? 'This dispute is already resolved.' : 'Could not save your statement. Please try again.')
+      }
+      setStatementSuccessC(true)
+      setDisputeRecordC(prev => prev ? { ...prev, creator_statement: text } : prev)
+    } catch (err: unknown) {
+      setStatementErrorC(err instanceof Error ? err.message : 'Please try again or contact support.')
+    } finally {
+      setStatementSubmittingC(false)
     }
   }
 
@@ -1467,6 +1509,46 @@ export default function MyCollabsPage() {
                       </p>
                     </div>
                   </div>
+                </div>
+              )}
+
+              {/* Dispute statement */}
+              {selected.status === 'disputed' && disputeRecordC && (
+                <div className="border border-gray-700/50 rounded-xl p-4 space-y-3">
+                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Your Statement</p>
+                  {['resolved', 'closed'].includes(disputeRecordC.status) ? (
+                    <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">
+                      {disputeRecordC.creator_statement ?? <span className="text-gray-600 italic">No statement on record.</span>}
+                    </p>
+                  ) : (
+                    <>
+                      <textarea
+                        value={statementDraftC}
+                        onChange={e => { setStatementDraftC(e.target.value); setStatementErrorC(''); setStatementSuccessC(false) }}
+                        placeholder="Provide your account of events clearly and factually. Our team will review statements from both parties."
+                        maxLength={2000}
+                        rows={4}
+                        className="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-gray-600 resize-none focus:outline-none focus:border-purple-500/50"
+                      />
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-gray-600">{statementDraftC.length}/2000</span>
+                        {statementSuccessC && <span className="text-xs text-green-400">Statement saved.</span>}
+                      </div>
+                      {statementErrorC && (
+                        <div className="flex items-start gap-2 text-xs text-red-400 bg-red-500/10 rounded-xl p-2.5">
+                          <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
+                          <span>{statementErrorC}</span>
+                        </div>
+                      )}
+                      <button
+                        onClick={submitCreatorStatement}
+                        disabled={statementSubmittingC || !statementDraftC.trim()}
+                        className="w-full py-2.5 rounded-xl bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+                        {statementSubmittingC && <Loader2 size={14} className="animate-spin" />}
+                        {statementSubmittingC ? 'Saving…' : disputeRecordC.creator_statement ? 'Update Statement' : 'Submit Statement'}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 
