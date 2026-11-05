@@ -1,6 +1,7 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { supabase } from './lib/supabase'
 
 import ComingSoonPage from './pages/ComingSoonPage'
 
@@ -87,11 +88,46 @@ function AppRoutes() {
   )
 }
 
+function MaintenanceGate({ children }: { children: React.ReactNode }) {
+  const [maintenance, setMaintenance] = useState(false)
+  const [checked, setChecked] = useState(false)
+
+  useEffect(() => {
+    supabase
+      .from('site_settings')
+      .select('value')
+      .eq('key', 'sys_maintenance_mode')
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.value === 'true' || data?.value === true) setMaintenance(true)
+        setChecked(true)
+      })
+  }, [])
+
+  if (!checked) return (
+    <div className="h-screen flex items-center justify-center bg-gray-950">
+      <div className="w-8 h-8 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+
+  if (maintenance) return (
+    <div className="h-screen flex flex-col items-center justify-center bg-gray-950 text-center px-6">
+      <div className="text-5xl mb-6">🔧</div>
+      <h1 className="text-2xl font-black text-white mb-3">We're doing some maintenance</h1>
+      <p className="text-gray-400 max-w-sm">Brandior will be back shortly. Thanks for your patience.</p>
+    </div>
+  )
+
+  return <>{children}</>
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <AppRoutes />
+        <MaintenanceGate>
+          <AppRoutes />
+        </MaintenanceGate>
       </BrowserRouter>
     </AuthProvider>
   )

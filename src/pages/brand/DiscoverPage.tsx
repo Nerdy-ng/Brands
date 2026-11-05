@@ -5,8 +5,7 @@ import BrandLayout from '../../components/BrandLayout'
 import Avatar from '../../components/Avatar'
 import { supabase } from '../../lib/supabase'
 import { formatAmount } from '../../lib/utils'
-
-const NICHES = ['All','Content Creator','Influencer','Photographer','Videographer','Graphic Designer','Copywriter','Social Media Manager','Podcaster','Animator']
+import { useWebAppConfig } from '../../lib/appConfig'
 
 const TIER_STYLES: Record<string, { label: string; class: string }> = {
   'fast-rising': { label: 'Fast Rising', class: 'text-green-400 bg-green-500/10'  },
@@ -16,6 +15,8 @@ const TIER_STYLES: Record<string, { label: string; class: string }> = {
 
 export default function DiscoverPage() {
   const navigate = useNavigate()
+  const { nicheCategories } = useWebAppConfig()
+  const NICHES = ['All', ...nicheCategories]
   const [allCreators, setAllCreators] = useState<any[]>([])
   const [query,       setQuery]       = useState('')
   const [niche,       setNiche]       = useState('All')

@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react'
+import { useWebAppConfig } from '../lib/appConfig'
 
-const LAUNCH = new Date('2026-10-28T00:00:00').getTime()
-
-function getTimeLeft() {
-  const diff = LAUNCH - Date.now()
-  if (diff <= 0) return { days: 0, hours: 0, minutes: 0, seconds: 0 }
+function getTimeLeft(launchMs: number) {
+  const diff = launchMs - Date.now()
+  if (diff <= 0) return null
   return {
     days:    Math.floor(diff / 86400000),
     hours:   Math.floor((diff % 86400000) / 3600000),
@@ -14,12 +13,15 @@ function getTimeLeft() {
 }
 
 export default function ComingSoonPage() {
-  const [time, setTime] = useState(getTimeLeft)
+  const { launchDate } = useWebAppConfig()
+  const launchMs = launchDate ? new Date(launchDate).getTime() : 0
+  const [time, setTime] = useState(() => launchMs > 0 ? getTimeLeft(launchMs) : null)
 
   useEffect(() => {
-    const id = setInterval(() => setTime(getTimeLeft()), 1000)
+    if (!launchMs) return
+    const id = setInterval(() => setTime(getTimeLeft(launchMs)), 1000)
     return () => clearInterval(id)
-  }, [])
+  }, [launchMs])
 
   const pad = (n: number) => String(n).padStart(2, '0')
 
@@ -34,6 +36,7 @@ export default function ComingSoonPage() {
           We're putting the finishing touches on something great. Check back soon.
         </p>
 
+        {time && (
         <div className="flex justify-center gap-4">
           {[
             { label: 'Days',    value: time.days },
@@ -47,6 +50,7 @@ export default function ComingSoonPage() {
             </div>
           ))}
         </div>
+        )}
       </div>
     </div>
   )

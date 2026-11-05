@@ -4,16 +4,12 @@ import CreatorLayout from '../../components/CreatorLayout'
 import Avatar from '../../components/Avatar'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
-
-const NICHES = [
-  'Content Creator','Influencer','Photographer','Videographer','Graphic Designer',
-  'Copywriter','Social Media Manager','Podcaster','UX/UI Designer','Animator',
-  'Voice Over Artist','Event Promoter','Brand Ambassador',
-]
+import { useWebAppConfig } from '../../lib/appConfig'
 
 export default function CreatorProfilePage() {
   const { user } = useAuth()
-  const [form, setForm] = useState({ full_name: '', phone: '', bio: '', min_price: '' })
+  const { nicheCategories: NICHES } = useWebAppConfig()
+  const [form, setForm] = useState({ full_name: '', phone: '', bio: '', min_price: '', professional_title: '' })
   const [niches,  setNiches]  = useState<string[]>([])
   const [socials, setSocials] = useState({ role: '', instagram: '', tiktok: '', youtube: '', twitter: '' })
   const [saving,  setSaving]  = useState(false)
@@ -26,14 +22,15 @@ export default function CreatorProfilePage() {
     async function load() {
       if (!user) return
       const { data } = await supabase.from('profiles')
-        .select('full_name, phone, bio, niches, socials, min_price')
+        .select('full_name, phone, bio, niches, socials, min_price, professional_title')
         .eq('id', user.id).single()
       if (data) {
         setForm({
-          full_name: data.full_name ?? '',
-          phone:     data.phone     ?? '',
-          bio:       data.bio       ?? '',
-          min_price: data.min_price ? String(data.min_price) : '',
+          full_name:          data.full_name          ?? '',
+          phone:              data.phone              ?? '',
+          bio:                data.bio                ?? '',
+          min_price:          data.min_price ? String(data.min_price) : '',
+          professional_title: data.professional_title ?? '',
         })
         setNiches(Array.isArray(data.niches) ? data.niches : [])
         const s = (data.socials ?? {}) as Record<string, string>
@@ -60,12 +57,13 @@ export default function CreatorProfilePage() {
     if (!user) return
     setSaving(true)
     await supabase.from('profiles').update({
-      full_name: form.full_name,
-      phone:     form.phone,
-      bio:       form.bio,
+      full_name:          form.full_name,
+      phone:              form.phone,
+      bio:                form.bio,
       niches,
       socials,
-      min_price: Number(form.min_price) || 0,
+      min_price:          Number(form.min_price) || 0,
+      professional_title: form.professional_title || null,
     }).eq('id', user.id)
     setSaved(true)
     setSaving(false)
@@ -100,6 +98,10 @@ export default function CreatorProfilePage() {
                 <label className="block text-sm text-gray-400 mb-1.5">Phone</label>
                 <input type="tel" value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="+234..." />
               </div>
+            </div>
+            <div>
+              <label className="block text-sm text-gray-400 mb-1.5">Professional Title</label>
+              <input type="text" value={form.professional_title} onChange={e => set('professional_title', e.target.value)} placeholder="e.g. Fashion & Lifestyle Creator" />
             </div>
             <div>
               <label className="block text-sm text-gray-400 mb-1.5">Bio</label>

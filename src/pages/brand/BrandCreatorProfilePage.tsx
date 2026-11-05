@@ -9,10 +9,7 @@ import Avatar from '../../components/Avatar'
 import { supabase } from '../../lib/supabase'
 import { formatAmount } from '../../lib/utils'
 import { useAuth } from '../../contexts/AuthContext'
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const PLATFORM_MINIMUM  = 20000
+import { useWebAppConfig } from '../../lib/appConfig'
 const HIRE_IDP_TTL_MS   = 2 * 60 * 60 * 1000
 
 const TIER_STYLES: Record<string, { label: string; class: string }> = {
@@ -33,6 +30,7 @@ interface CreatorProfile {
   tier: string | null
   bio: string | null
   min_price: number | null
+  professional_title: string | null
   socials: {
     instagram?: string
     tiktok?: string
@@ -184,6 +182,7 @@ export default function BrandCreatorProfilePage() {
   const { id: creatorId } = useParams<{ id: string }>()
   const navigate          = useNavigate()
   const { user }          = useAuth()
+  const { minCollabAmount: PLATFORM_MINIMUM } = useWebAppConfig()
 
   // ── Profile + rate card ───────────────────────────────────────────────────
   const [profile,   setProfile]   = useState<CreatorProfile | null>(null)
@@ -223,7 +222,7 @@ export default function BrandCreatorProfilePage() {
 
       const { data, error: profileErr } = await supabase
         .from('profiles')
-        .select('id, full_name, avatar_url, niches, tier, bio, min_price, socials, website, role')
+        .select('id, full_name, avatar_url, niches, tier, bio, min_price, professional_title, socials, website, role')
         .eq('id', creatorId)
         .maybeSingle()
 
@@ -485,8 +484,10 @@ export default function BrandCreatorProfilePage() {
               <h1 className="text-xl font-bold text-white">{displayName}</h1>
               {tier && <span className={`badge ${tier.class}`}>{tier.label}</span>}
             </div>
-            {profile!.niches?.[0] && (
-              <p className="text-purple-400 text-sm font-medium mt-1">{profile!.niches[0]}</p>
+            {(profile!.professional_title || profile!.niches?.[0]) && (
+              <p className="text-purple-400 text-sm font-medium mt-1">
+                {profile!.professional_title || profile!.niches![0]}
+              </p>
             )}
             {!rcLoading && startingPrice !== null && startingPrice > 0 && (
               <p className="text-gray-400 text-sm mt-2">

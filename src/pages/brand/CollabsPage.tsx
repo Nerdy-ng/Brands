@@ -8,6 +8,7 @@ import Avatar from '../../components/Avatar'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { formatAmount, timeAgo } from '../../lib/utils'
+import { useWebAppConfig } from '../../lib/appConfig'
 import { Link, useSearchParams } from 'react-router-dom'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -129,6 +130,7 @@ function creatorOf(c: Collab): CollabProfile | null {
 
 export default function CollabsPage() {
   const { user } = useAuth()
+  const { minCollabAmount } = useWebAppConfig()
   const [searchParams, setSearchParams] = useSearchParams()
   const openParam = searchParams.get('open')
 
@@ -534,8 +536,8 @@ export default function CollabsPage() {
     const title  = taskTitle.trim()
     const amount = Number(taskAmount)
     if (!title) { setTaskError('Task title is required.'); return }
-    if (!Number.isFinite(amount) || amount < 20000) {
-      setTaskError('Amount must be at least ₦20,000.'); return
+    if (!Number.isFinite(amount) || amount < minCollabAmount) {
+      setTaskError(`Amount must be at least ₦${minCollabAmount.toLocaleString()}.`); return
     }
     setTaskSubmitting(true)
     setTaskError('')
@@ -1325,8 +1327,8 @@ export default function CollabsPage() {
                   value={taskAmount}
                   onChange={e => setTaskAmount(e.target.value)}
                   disabled={taskSubmitting}
-                  min="20000"
-                  placeholder="Minimum ₦20,000"
+                  min={minCollabAmount}
+                  placeholder={`Minimum ₦${minCollabAmount.toLocaleString()}`}
                   className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 w-full focus:outline-none focus:border-purple-600 transition-colors disabled:opacity-50"
                 />
                 <p className="text-xs text-gray-600 mt-1">Platform minimum ₦20,000</p>

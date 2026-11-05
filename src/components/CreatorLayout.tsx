@@ -6,11 +6,12 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { cn } from '../lib/utils'
+import AnnouncementBanner from './AnnouncementBanner'
 
 const NAV = [
   { icon: LayoutDashboard, label: 'Dashboard',    href: '/creator' },
   { icon: Briefcase,       label: 'Opportunities',href: '/creator/opportunities' },
-  { icon: FileText,        label: 'My Collabs',   href: '/creator/collabs' },
+  { icon: FileText,        label: 'Collabs',      href: '/creator/collabs' },
   { icon: Wallet,          label: 'Wallet',       href: '/creator/wallet' },
   { icon: User,            label: 'Profile',      href: '/creator/profile' },
 ]
@@ -92,6 +93,7 @@ export default function CreatorLayout({ children }: { children: React.ReactNode 
         </div>
 
         <main className="flex-1 overflow-y-auto p-5 lg:p-7">
+          <AnnouncementBanner role="creator" />
           {children}
         </main>
       </div>
