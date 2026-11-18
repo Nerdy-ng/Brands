@@ -27,4 +27,6 @@ export const rubies = {
   resolveAccount: (accountNumber: string, bankName: string) => invoke('rubies-name-enquiry', { accountNumber, bankName }),
   payout: (params: { bankName: string; bankAccountNumber: string; amount: number }) => invoke('rubies-payout', params),
   kyc: (params: { bvn?: string; nin?: string; firstName: string; lastName: string; dob: string }) => invoke('rubies-kyc', params),
+  createWallet: (params: { bvn?: string; nin?: string; firstName: string; lastName: string; dob: string; phoneNumber: string }) =>
+    invoke('rubies-create-wallet', params),
 }

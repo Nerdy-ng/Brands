@@ -16,6 +16,8 @@ export default function WalletPage() {
   const { user } = useAuth()
   const [balance,     setBalance]     = useState(0)
   const [kycVerified, setKycVerified] = useState(false)
+  const [hasWallet,   setHasWallet]   = useState(false)
+  const verified = kycVerified && hasWallet
   const [showBalance, setShowBalance] = useState(true)
   const [transactions, setTransactions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -23,7 +25,7 @@ export default function WalletPage() {
   // KYC form
   const [showKyc,    setShowKyc]    = useState(false)
   const [kycMethod,  setKycMethod]  = useState<'bvn' | 'nin'>('bvn')
-  const [kycForm,    setKycForm]    = useState({ idNumber: '', firstName: '', lastName: '', dob: '' })
+  const [kycForm,    setKycForm]    = useState({ idNumber: '', firstName: '', lastName: '', dob: '', phoneNumber: '' })
   const [kycError,   setKycError]   = useState('')
   const [kycLoading, setKycLoading] = useState(false)
 
@@ -43,11 +45,15 @@ export default function WalletPage() {
     setLoading(true)
     try {
       const [profileRes, txRes] = await Promise.all([
-        supabase.from('profiles').select('wallet_balance, identity_verified').eq('id', user.id).single(),
+        supabase.from('profiles').select('wallet_balance, identity_verified, rubies_account_number, phone').eq('id', user.id).single(),
         supabase.from('transactions').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20),
       ])
       setBalance(profileRes.data?.wallet_balance || 0)
       setKycVerified(profileRes.data?.identity_verified === true)
+      setHasWallet(!!profileRes.data?.rubies_account_number)
+      if (profileRes.data?.phone) {
+        setKycForm(f => ({ ...f, phoneNumber: f.phoneNumber || profileRes.data.phone }))
+      }
       setTransactions(txRes.data || [])
     } finally {
       setLoading(false)
@@ -104,7 +110,23 @@ export default function WalletPage() {
         dob:       kycForm.dob,
       } as any)
       setKycVerified(true)
-      setShowKyc(false)
+
+      try {
+        await rubies.createWallet({
+          [kycMethod]: kycForm.idNumber,
+          firstName:   kycForm.firstName,
+          lastName:    kycForm.lastName,
+          dob:         kycForm.dob,
+          phoneNumber: kycForm.phoneNumber,
+        } as any)
+        setHasWallet(true)
+        setShowKyc(false)
+      } catch (walletErr: any) {
+        // Identity is verified, but the wallet could not be created — leave the
+        // modal open and do NOT mark the creator withdraw-ready. `verified`
+        // stays false until hasWallet is also true, so retrying is just resubmitting this form.
+        setKycError(walletErr.message || 'Identity verified, but wallet setup failed. Please try again.')
+      }
     } catch (err: any) {
       setKycError(err.message || 'Verification failed')
     } finally {
@@ -128,7 +150,7 @@ export default function WalletPage() {
           <div className="flex items-center justify-between mb-4">
             <p className="text-green-200 text-sm font-medium">Earnings Balance</p>
             <div className="flex items-center gap-2">
-              {kycVerified ? (
+              {verified ? (
                 <span className="flex items-center gap-1.5 text-xs bg-white/20 px-3 py-1 rounded-full text-white">
                   <ShieldCheck size={12} /> Verified
                 </span>
@@ -145,9 +167,9 @@ export default function WalletPage() {
           <p className="text-4xl font-bold text-white mb-6">
             {showBalance ? formatAmount(balance) : '● ● ● ● ●'}
           </p>
-          <button onClick={() => kycVerified ? setShowPayout(true) : setShowKyc(true)}
+          <button onClick={() => verified ? setShowPayout(true) : setShowKyc(true)}
             className="flex items-center gap-2 bg-white text-green-700 font-semibold px-5 py-2.5 rounded-xl hover:bg-green-50 transition-colors text-sm">
-            {kycVerified
+            {verified
               ? <><ArrowDownLeft size={16} /> Withdraw</>
               : <><Lock size={16} /> Verify to Withdraw</>}
           </button>
@@ -155,12 +177,12 @@ export default function WalletPage() {
       </div>
 
       {/* KYC Banner */}
-      {!kycVerified && (
+      {!verified && (
         <div className="card border-amber-500/30 bg-amber-500/5 mb-6 flex items-center gap-4">
           <AlertTriangle size={20} className="text-amber-400 flex-shrink-0" />
           <div className="flex-1">
-            <p className="text-amber-300 font-medium text-sm">Identity verification required</p>
-            <p className="text-amber-400/70 text-xs mt-0.5">Verify your identity to withdraw your earnings</p>
+            <p className="text-amber-300 font-medium text-sm">{kycVerified ? 'Wallet setup incomplete' : 'Identity verification required'}</p>
+            <p className="text-amber-400/70 text-xs mt-0.5">{kycVerified ? 'Finish setting up your payout wallet to withdraw your earnings' : 'Verify your identity to withdraw your earnings'}</p>
           </div>
           <button onClick={() => setShowKyc(true)}
             className="bg-amber-500 hover:bg-amber-400 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors flex-shrink-0">
@@ -289,6 +311,11 @@ export default function WalletPage() {
               <div>
                 <label className="block text-sm text-gray-400 mb-1.5">Date of Birth</label>
                 <input type="date" required value={kycForm.dob} onChange={e => setKyc('dob', e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1.5">Phone Number</label>
+                <input type="tel" required value={kycForm.phoneNumber}
+                  onChange={e => setKyc('phoneNumber', e.target.value)} placeholder="e.g. 08012345678" />
               </div>
               {kycError && (
                 <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">{kycError}</p>
